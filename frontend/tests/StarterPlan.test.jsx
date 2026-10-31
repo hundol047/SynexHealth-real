@@ -25,9 +25,12 @@ it('personal mode builds a gentle starter plan before any measurement',async()=>
 });
 
 it('server mode guides the user to measurement entry instead of a dead-end error',async()=>{
- mockFetch({'/api/exercise-routines/generate':{status:404,body:{detail:'체성분 측정 데이터가 없어 루틴을 생성할 수 없습니다.'}},'/api/exercise-routines':[],'/api/adaptive':[]});
+ const profile={goal:'GENERAL_HEALTH',experience_level:'BEGINNER',days_per_week:3,minutes_per_session:30,training_mode:'mixed',exercise_location:'home',available_equipment:[],limitations:[],preferences:[],focus_regions:[],plan_unit:'week',plan_length:4};
+ mockFetch({'/api/exercise-profile':profile,'/api/exercise-routines/generate':{status:404,body:{detail:'체성분 측정 데이터가 없어 루틴을 생성할 수 없습니다.'}},'/api/exercise-routines':[],'/api/adaptive':[]});
  render(<MemoryRouter><RoutinePage/></MemoryRouter>);
  await userEvent.click(await screen.findByRole('button',{name:'내 운동 계획 만들기'}));
+ // Generation first confirms the goal, period and focus regions.
+ await userEvent.click(await screen.findByRole('button',{name:'이 조건으로 루틴 생성'}));
  expect(await screen.findByText('체성분을 먼저 입력해 주세요')).toBeTruthy();
  expect(screen.getByRole('link',{name:'체성분 입력하기'}).getAttribute('href')).toBe('/health/profile#measurement-entry');
  expect(screen.queryByText('다시 시도')).toBeNull();
