@@ -73,3 +73,65 @@ def test_catalog_camera_and_export_audit(client):
     assert client.get('/api/privacy/export').status_code==200
     from app.health.router import audit
     assert any(e['event']=='data_export' and e['detail']=={} for e in audit.list('student-jimin'))
+
+
+def test_security_headers_validation_redaction_and_auth_budget(monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from app.services import security
+    client = TestClient(app)
+    api = client.get('/api/health/status')
+    assert api.headers['content-security-policy'] == security.API_CSP
+    assert 'geolocation=()' in api.headers['permissions-policy']
+    assert api.headers['cross-origin-opener-policy'] == 'same-origin'
+    page = client.get('/healthz')
+    assert "script-src 'self' 'wasm-unsafe-eval'" in page.headers['content-security-policy']
+    assert "object-src 'none'" in page.headers['content-security-policy']
+    assert "'unsafe-eval'" not in page.headers['content-security-policy'].replace("'wasm-unsafe-eval'", '')
+    # Submitted health values must not be reflected by validation errors.
+    bad = client.post('/api/body-composition', json={'measurement_date': '2026-01-01', 'weight': 'SECRET-73.5kg', 'skeletal_muscle_mass': 20},
+                      headers={'X-Synex-Demo-User': 'student-jimin'})
+    assert bad.status_code == 422
+    assert 'SECRET-73.5kg' not in bad.text
+    assert all(set(item) == {'loc', 'msg', 'type'} for item in bad.json()['detail'])
+
+
+def test_auth_endpoints_have_a_smaller_rate_budget():
+    import asyncio
+    from app.services.security import SecurityMiddleware
+    statuses = []
+
+    async def inner(scope, receive, send):
+        await send({'type': 'http.response.start', 'status': 204, 'headers': []})
+        await send({'type': 'http.response.body', 'body': b''})
+
+    middleware = SecurityMiddleware(inner)
+
+    async def call(path):
+        async def receive():
+            return {'type': 'http.request', 'body': b'', 'more_body': False}
+
+        async def send(message):
+            if message['type'] == 'http.response.start':
+                statuses.append(message['status'])
+        await middleware({'type': 'http', 'method': 'GET', 'path': path, 'headers': [], 'client': ('203.0.113.9', 1), 'scheme': 'http'}, receive, send)
+
+    async def run():
+        for _ in range(31):
+            await call('/api/auth/session')
+        await call('/api/health/status')
+    asyncio.run(run())
+    assert statuses[:30] == [204] * 30 and statuses[30] == 429
+    assert statuses[31] == 204
+
+
+def test_api_documentation_is_not_published_in_production():
+    import os, subprocess, sys
+    code = ("from app.main import app;"
+            "print([u for u in (app.docs_url, app.redoc_url, app.openapi_url) if u])")
+    dev = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True, env={**os.environ, 'APP_ENV': 'development'})
+    assert '/openapi.json' in dev.stdout
+    pilot_env = {**os.environ, 'PILOT_MODE': 'true'}
+    out = subprocess.run([sys.executable, '-c', "import os\nfrom app.services import release_config\nrelease_config.validate_production=lambda env=None:None\n" + code],
+                         capture_output=True, text=True, env=pilot_env)
+    assert out.stdout.strip() == '[]', out.stderr[-400:]

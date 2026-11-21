@@ -88,6 +88,7 @@ export default function WorkoutPage() {
             ))}
           </div>
         )}
+        {dayExercises.length > 1 && <nav className="section-jump workout-jump" aria-label="오늘의 운동 바로가기">{dayExercises.map((ex,i)=><button type="button" key={(ex.exercise_id||ex.exercise_name)+i} className={`section-jump-chip ${isDone(ex)?'is-done':''}`} onClick={()=>document.getElementById(ex.exercise_id)?.scrollIntoView?.({behavior:'smooth',block:'start'})}>{isDone(ex)?'✓ ':`${i+1}. `}{ex.exercise_name}</button>)}</nav>}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {dayExercises.length === 0 && <p className="muted">이 날에는 계획된 운동이 없습니다.</p>}
           {dayExercises.map((ex,i) => {

@@ -89,5 +89,6 @@ test('personal build enforces local requests and accepts equipment motion URLs',
   try{await fetch('https://odml.pa.googleapis.com/v1/log',{method:'POST',body:'privacy-boundary-probe'});}catch{blocked=true;}
   return {policy,blocked};
  });
- expect(boundary).toEqual({policy:"connect-src 'self'",blocked:true});
+ expect(boundary.blocked).toBe(true);
+ expect(boundary.policy).toContain("connect-src 'self' data: blob:;");expect(boundary.policy).toContain("script-src 'self' 'wasm-unsafe-eval';");expect(boundary.policy).toContain("object-src 'none'");
 });

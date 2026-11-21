@@ -4,6 +4,7 @@ validate_production()
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -35,13 +36,32 @@ async def lifespan(app):
         seed_demo_data(health_store)
     yield
 
-app = FastAPI(title='Synex Health API', version='0.1.0', lifespan=lifespan)
+# Interactive API documentation describes every endpoint and schema; never publish it in production.
+_public_docs = os.getenv('APP_ENV') != 'production' and os.getenv('PILOT_MODE') != 'true'
+app = FastAPI(title='Synex Health API', version='0.1.0', lifespan=lifespan,
+              docs_url='/docs' if _public_docs else None, redoc_url='/redoc' if _public_docs else None,
+              openapi_url='/openapi.json' if _public_docs else None)
 from .services.security import SecurityMiddleware
 app.add_middleware(SecurityMiddleware)
 _cors_origins, _cors_allow_credentials = resolve_cors_config()
 app.add_middleware(CORSMiddleware, allow_origins=_cors_origins, allow_credentials=_cors_allow_credentials,
                     allow_methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
                     allow_headers=['Content-Type', 'Authorization', 'X-Synex-Demo-User', 'Idempotency-Key'])
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_handler(request, exc):
+    # The default response echoes the submitted value ("input") and context back. Those are
+    # health measurements; return only where the problem is and what it is.
+    return JSONResponse(status_code=422, content={'detail': [
+        {'loc': list(error.get('loc', ())), 'msg': error.get('msg', ''), 'type': error.get('type', '')} for error in exc.errors()]})
+
+
+@app.exception_handler(Exception)
+async def unexpected_handler(request, exc):
+    # Log the failure class and route only -- never the message, which can carry user data.
+    log.error('unhandled %s on %s %s', type(exc).__name__, request.method, request.url.path)
+    return JSONResponse(status_code=500, content={'detail': '일시적인 오류가 발생했습니다. 잠시 후 다시 시도하세요.'})
 
 
 @app.exception_handler(ProviderNotConfigured)

@@ -43,7 +43,9 @@ export async function api(path, body, { method, signal, headers, offlineRetry=fa
     if (response.status === 401) window.dispatchEvent(new Event('synex-session-expired'));
     let data;
     try { data = await response.json(); } catch {}
-    const err = new Error(typeof data?.detail === 'string' ? data.detail : data?.detail?.message || `요청 실패 (${response.status}). 서버 연결을 확인하십시오.`);
+    // Validation failures arrive as a list; name the fields instead of showing a bare status code.
+    const fields = Array.isArray(data?.detail) ? [...new Set(data.detail.map(item => item?.loc?.at?.(-1)).filter(value => typeof value === 'string'))].slice(0, 3) : null;
+    const err = new Error(typeof data?.detail === 'string' ? data.detail : data?.detail?.message || (fields ? `입력값을 확인해 주세요${fields.length ? ` (${fields.join(', ')})` : ''}.` : `요청 실패 (${response.status}). 서버 연결을 확인하십시오.`));
     err.status = response.status; err.data = data;
     throw err;
   }

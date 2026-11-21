@@ -8,3 +8,16 @@ VERIFIED: existing ownership/consent/deletion tests plus adaptive-history purge 
 
 
 Status definitions: VERIFIED means a named automated/browser check passed; IMPLEMENTED / NOT DEVICE VERIFIED means code exists without physical-device evidence; EXTERNAL SETUP REQUIRED needs operator systems; NOT IMPLEMENTED means no working feature is claimed.
+
+## Hardening update — 2026-11-21
+
+IMPLEMENTED / VERIFIED by automated tests (`backend/tests/test_production_hardening.py`, `frontend/tests/AppLock.test.jsx`) and a browser pass over ten personal-build screens with no policy violations:
+
+- **Response headers.** Every response carries `Content-Security-Policy`, `Permissions-Policy` (camera and microphone for this origin only; geolocation, payment, USB, Bluetooth disabled), `Cross-Origin-Opener-Policy: same-origin` and `X-Permitted-Cross-Domain-Policies: none`. HSTS now includes subdomains. API responses use `default-src 'none'`. The app shell allows only bundled scripts (`script-src 'self' 'wasm-unsafe-eval'`), with no `unsafe-eval` or inline script.
+- **Personal build policy.** The build-time policy widened from `connect-src 'self'` alone to a full policy (scripts, styles, images, media, workers, objects, base URI, forms). Requests to other hosts stay blocked.
+- **API documentation.** `/docs`, `/redoc` and `/openapi.json` are not served when `APP_ENV=production` or `PILOT_MODE=true`.
+- **Error responses.** Validation errors return only location, message and type. The submitted value (a health measurement) is no longer echoed. Unhandled errors return a fixed message; the log records the exception class and route, not its message.
+- **Sign-in rate budget.** `/api/auth/*` is limited to 30 requests a minute per client address, separate from the general 240. Like the general limit it is per process; a shared gateway limiter is still required behind multiple workers or a proxy that hides client addresses.
+- **App lock.** Optional 4–8 digit PIN (Privacy screen). The app renders nothing behind the lock at launch and after one minute in the background. The PIN is stored only as a salted PBKDF2-SHA256 derivation (310,000 rounds); repeated or sequential digits are refused; after five misses the wait starts at 30 seconds and doubles to 15 minutes. A forgotten PIN cannot be recovered: the only way forward is wiping the device records (restore from an encrypted backup afterwards).
+
+Limits to state plainly: the app lock is a screen lock, not the encryption key. Records are encrypted by the device key whether or not the lock is on, and a short numeric PIN does not protect against someone who can read the device's storage directly. Biometric unlock is NOT IMPLEMENTED. `style-src` still allows inline styles because React style attributes need it. `connect-src` on the server-hosted shell allows `https:` because the OIDC token endpoint lives on the identity provider's host. None of this has been verified on a physical device.
