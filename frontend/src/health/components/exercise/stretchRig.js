@@ -6,6 +6,16 @@ import {handRestFrame} from './exerciseGrip.js';
 const ids=new Set(STRETCHES.map(s=>s.motion_id));
 export const FLOOR_STRETCHES=new Set(['hamstring_floor','figure_four','hip_flexor','butterfly','child','child_side','knee_hug','double_knee','supine_hamstring','ankle_circles','cat_release'].map(s=>`recovery_${s}`));
 
+// A planted supine foot lies flat on the mat; a lifted foot stays square to its shin.
+// The former fixed toes-up rotation stood planted shoes on their heels like a wall stance.
+function supineFoot(j,side,id,amount){
+ const flat=new THREE.Quaternion();
+ if(!(id==='double_knee'||side===0))return flat;
+ const [knee,ankle]=side?[13,14]:[10,11],shin=vector(j[ankle]).sub(vector(j[knee])).normalize(),lifted=smoothStep(0,.3,amount);
+ if(id==='figure_four')return flat.slerp(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,-1,0),shin),lifted);
+ return flat.setFromAxisAngle(new THREE.Vector3(1,0,0),-(Math.atan2(shin.y,shin.z)+Math.PI/2)*lifted);
+}
+
 // Fixed-length limb IK, authored endpoints and a slow enter/hold/release cycle.
 // No measured-person motion or biomechanical accuracy is implied by this rig.
 function rawStretchPose(motion,t,rest){
@@ -46,7 +56,7 @@ function rawStretchPose(motion,t,rest){
   const shoulder=j[side?6:3];arm(side,[shoulder[0]/h+sign*.055,shoulder[1]/h-.46,shoulder[2]/h+.045]);
  }
  if(seated){for(const side of [0,1])leg(side,[(side?-.14:.14),.09,id==='hamstring_floor'?.80:.69],[0,1,0]);for(const side of [0,1])arm(side,[(side?-.24:.24),.12,.10],[side?-1:1,0,0]);}
- if(supine){for(const side of [0,1]){leg(side,[(side?-.14:.14),.09,.73],[0,1,0]);arm(side,[(side?-.26:.26),.10,.15],[side?-1:1,0,0]);}}
+ if(supine){for(const side of [0,1]){leg(side,[(side?-.14:.14),.10,.775],[0,1,0]);arm(side,[(side?-.26:.26),.10,.15],[side?-1:1,0,0]);}}
  if(child){for(const side of [0,1]){
   const sign=side?-1:1,[root,knee,ankle]=side?[12,13,14]:[9,10,11];
   const dy=j[root][1]-.085*h,dx=j[root][0]-sign*.14*h,thigh=segmentLength(rest,root,knee);
@@ -76,15 +86,37 @@ function rawStretchPose(motion,t,rest){
   case 'thoracic_turn':endpoint(0,[.10,1.28,.27],[1,-1,0]);endpoint(1,[-.02,1.31,.32],[-1,-1,0]);break;
   case 'hamstring_stand':leg(0,[.16,.09,.29],[0,0,1]);endpoint(0,[.14,1.0,.20]);endpoint(1,[-.14,1.0,.20]);break;
   case 'hamstring_floor':for(const side of [0,1])arm(side,[(side?-.18:.18),.36,.30+.10*amount],[side?-1:1,0,0]);break;
-  case 'figure_four':leg(1,[-.13,.10,.53],[0,1,0]);leg(0,[-.10,.40+.05*amount,.42],[1,1,0]);break;
+  case 'figure_four':{
+   leg(1,[-.13,.10,.60],[0,1,0]);
+   const rest0=vector(j[11]),perch=vector(j[12]).lerp(vector(j[13]),.8);perch.y+=.105*h;
+   solveLimb(j,rest,0,'leg',rest0.lerp(perch,amount).toArray(),[amount,1-.5*amount,0]);break;
+  }
   case 'quad_stand':leg(0,[.15,.09+.82*amount,-.25*amount],[0,-.7,1]);endpoint(0,[.15,.98,-.25],[1,0,-1]);break;
   case 'hip_flexor':leg(0,[.16,.09,.43],[0,0,1]);leg(1,[-.14,.09,-.40],[0,-1,1]);endpoint(0,[.15,.63,.28]);endpoint(1,[-.11,.66,.24]);break;
   case 'calf_straight':case 'calf_bent':leg(0,[.15,.09,.25],[0,0,1]);leg(1,[-.15,.09,-.24],[0,0,1]);break;
   case 'adductor_side':leg(0,[.44,.09,0],[0,0,1]);leg(1,[-.44,.09,0],[0,0,1]);break;
   case 'butterfly':leg(0,[.035,.09,.36],[1,0,0]);leg(1,[-.035,.09,.36],[-1,0,0]);arm(0,[.08,.23,.34],[1,0,0]);arm(1,[-.08,.23,.34],[-1,0,0]);break;
   case 'knee_hug':case 'double_knee':case 'supine_hamstring':{
-   for(const side of id==='double_knee'?[0,1]:[0])leg(side,[(side?-.14:.14),.11+amount*(id==='supine_hamstring'?.70:.34),.72-amount*(id==='supine_hamstring'?.47:.48)],[0,1,-1]);
-   const knee=j[10],other=id==='double_knee'?j[13]:knee;arm(0,[knee[0]/h+.06,knee[1]/h-.08,knee[2]/h+.05],[1,1,0]);arm(1,[other[0]/h-.06,other[1]/h-.08,other[2]/h+.05],[-1,1,0]);break;
+   // Hip and knee angles are authored directly. The former ankle target folded the
+   // thigh ~150 degrees so it passed through the abdomen, and the hands through the chest.
+   const [phi1,theta1,inward]=id==='knee_hug'?[125,115,.12]:id==='double_knee'?[122,115,0]:[118,40,.08];
+   const rad=Math.PI/180,phi=(40+(phi1-40)*amount)*rad,theta=(88+(theta1-88)*amount)*rad;
+   for(const side of id==='double_knee'?[0,1]:[0]){
+    const sign=side?-1:1,[root,knee,ankle]=side?[12,13,14]:[9,10,11];
+    const thigh=vector([-sign*inward*amount,Math.sin(phi),Math.cos(phi)]).normalize();
+    j[knee]=vector(j[root]).addScaledVector(thigh,segmentLength(rest,root,knee)).toArray();
+    j[ankle]=vector(j[knee]).addScaledVector(vector([0,Math.sin(phi-theta),Math.cos(phi-theta)]),segmentLength(rest,knee,ankle)).toArray();
+   }
+   // Hands support the back of the thigh just above the knee, approached from the sides.
+   for(const side of [0,1]){
+    const sign=side?-1:1,legSide=id==='double_knee'?side:0,[root,knee]=legSide?[12,13]:[9,10];
+    const along=vector(j[knee]).sub(vector(j[root])).normalize(),back=vector([0,-along.z,along.y]);
+    const grip=vector(j[knee]).addScaledVector(along,-.08*h).addScaledVector(back,.015*h);grip.x+=sign*.078*h;
+    const neutral=vector(s([sign*.26,.10,.15]));
+    solveLimb(j,rest,side,'arm',neutral.lerp(grip,amount).toArray(),[sign,.6,-.3]);
+    j.thighGrip||=[];j.thighGrip[side]=vector([-sign*.55,0,0]).addScaledVector(back,.85).normalize().toArray();
+   }
+   break;
   }
   case 'ankle_circles':leg(0,[.15,.14,.67],[0,1,0]);break;
  }
@@ -94,9 +126,10 @@ function rawStretchPose(motion,t,rest){
   let direction=vector(j[wrist]).sub(vector(j[elbow])).normalize().toArray();
   if(id==='triceps'&&side===1)direction=vector(direction).lerp(vector(j[4]).sub(vector(j[wrist])).normalize(),smoothStep(.3,.8,amount)).normalize().toArray();
   if(id==='quad_stand'&&side===0)direction=vector(direction).lerp(vector(j[11]).sub(vector(j[wrist])).normalize(),smoothStep(.3,.8,amount)).normalize().toArray();
+  if(j.thighGrip)direction=vector(direction).lerp(vector(j.thighGrip[side]),smoothStep(.3,.8,amount)).normalize().toArray();
   if(side===0&&id.startsWith('wrist_'))direction=vector(direction).applyAxisAngle(new THREE.Vector3(1,0,0),(id==='wrist_flex'?-1:1)*Math.PI/3*amount).toArray();
   setHand(j,rest,side,direction);
-  const footRotation=(seated||supine)?new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),-Math.PI/2):new THREE.Quaternion();
+  const footRotation=supine?supineFoot(j,side,id,amount):seated?new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),-Math.PI/2):new THREE.Quaternion();
   if(child)footRotation.setFromAxisAngle(new THREE.Vector3(0,1,0),Math.PI);
   if(id==='quad_stand'&&side===0)footRotation.setFromAxisAngle(new THREE.Vector3(1,0,0),-1.2*amount);
   if(id==='ankle_circles'&&side===0)footRotation.setFromAxisAngle(new THREE.Vector3(1,0,0),-Math.PI/2+Math.cos(t*Math.PI*4)*.18).premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),Math.sin(t*Math.PI*4)*.18));
@@ -124,6 +157,7 @@ function rawStretchPose(motion,t,rest){
  return j;
 }
 
+const ARM_ROUTES={side_reach:{0:'side'},triceps:{0:'front',1:'front'},shoulder_cross:{0:'front',1:'front'}};
 const transitions=new WeakMap();
 export function stretchPoseJoints(motion,t,rest){
  if(!ids.has(motion))return null;
@@ -138,9 +172,18 @@ export function stretchPoseJoints(motion,t,rest){
  if(['quad_stand','knee_hug','double_knee','supine_hamstring'].includes(id))limbs.push([9,10,6],[10,11,7],[12,13,8],[13,14,9]);
  limbs.push([5,17,12],[8,18,13]);
  for(const [a,b,bone] of limbs){
-  const rotation=new THREE.Quaternion().fromArray(start.boneRotations[bone]).slerp(new THREE.Quaternion().fromArray(end.boneRotations[bone]),amount);
+  const from=new THREE.Quaternion().fromArray(start.boneRotations[bone]),to=new THREE.Quaternion().fromArray(end.boneRotations[bone]);
+  // A single shortest arc from a hanging arm to an overhead or cross-body hold
+  // swept the limb straight through the chest and neck. Raise it around the body first.
+  const armSide=[2,3,12].includes(bone)?0:[4,5,13].includes(bone)?1:-1,route=armSide<0?null:ARM_ROUTES[id]?.[armSide];
+  let rotation;
+  if(route){
+   const via=(route==='side'?new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),(armSide?-1:1)*1.66):new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),-1.4)).multiply(from);
+   rotation=amount<.5?from.clone().slerp(via,amount*2):via.slerp(to,amount*2-1);
+  }else rotation=from.slerp(to,amount);
   posed.boneRotations[bone]=rotation.toArray();posed[b]=vector(rest[b]).sub(vector(rest[a])).applyQuaternion(rotation).add(vector(posed[a])).toArray();
  }
+ if(['knee_hug','double_knee','supine_hamstring'].includes(id))for(const side of [0,1])posed.boneRotations[10+side]=supineFoot(posed,side,id,amount).toArray();
  for(const [ankle,toe,bone] of [[11,15,10],[14,16,11]])posed[toe]=vector(rest[toe]).sub(vector(rest[ankle])).applyQuaternion(new THREE.Quaternion().fromArray(posed.boneRotations[bone])).add(vector(posed[ankle])).toArray();
  return posed;
 }

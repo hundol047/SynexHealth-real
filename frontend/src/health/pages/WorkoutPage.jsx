@@ -32,6 +32,12 @@ export default function WorkoutPage() {
   const workouts = useApiData(() => HealthAPI.listWorkouts(), []);
   const [workoutMode,setWorkoutMode]=useState(()=>query.get('mode')==='tempo'?'tempo':query.get('mode')==='guided');
   const [selectedDay, setSelectedDay] = useState(null);
+  const [creating,setCreating]=useState(false),[createFailed,setCreateFailed]=useState(false);
+  // One tap from the empty workout screen; the plan screen explains anything that blocks it.
+  async function createPlan(){
+    setCreating(true);setCreateFailed(false);
+    try{await HealthAPI.generateRoutine();await routines.reload();}catch{setCreateFailed(true);}finally{setCreating(false);}
+  }
 
   const requested=query.get('routine');
   const latest = requested?(routines.data||[]).find(r=>r.id===requested):(routines.data || [])[0];
@@ -57,8 +63,8 @@ export default function WorkoutPage() {
       <Card>
         <EmptyState
           title="운동 루틴이 없어요"
-          description="루틴 페이지에서 먼저 맞춤 루틴을 생성해 보세요."
-          action={<Link className="btn btn-primary" to="/health/routine">루틴 만들러 가기</Link>}
+          description="버튼 한 번으로 운동 계획을 만들고 바로 기록을 시작할 수 있어요."
+          action={<><button type="button" className="btn btn-primary" onClick={createPlan} disabled={creating}>{creating?'만드는 중...':'운동 계획 바로 만들기'}</button>{createFailed&&<p className="muted" role="status">여기서 만들지 못했어요. <Link to="/health/routine">운동 계획 화면</Link>에서 필요한 항목을 확인해 주세요.</p>}</>}
         />
       </Card>
     );

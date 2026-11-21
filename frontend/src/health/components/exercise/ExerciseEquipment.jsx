@@ -248,8 +248,10 @@ function LegMachine({ r, spec, joints }) {
     }) : <>
       <Axial r={r} at={shinRoller} axis={axis} radius={.065 * h} length={.53 * h} material="pad"/>
       {[-1, 1].map(side => <Tube key={side} r={r} a={[side * .26 * h, kneeAxis[1], kneeAxis[2]]} b={add(shinRoller, [side * .26 * h, 0, 0])} radius={.021 * h} material="trim"/>)}
-      <Axial r={r} at={kneeAxis} axis={axis} radius={.048 * h} length={.55 * h} material="accent"/>
-      {kind === 'seated_leg_curl' && <Axial r={r} at={add(kneeAxis, [0, .07 * h, -.11 * h])} axis={axis} radius={.068 * h} length={.51 * h} material="pad"/>}
+      {/* Pivot hubs sit outside the legs. A single axle used to run straight through both knees. */}
+      {[-1, 1].map(side => <Axial key={`hub${side}`} r={r} at={add(kneeAxis, [side * .262 * h, 0, 0])} axis={axis} radius={.048 * h} length={.05 * h} material="accent"/>)}
+      {/* The thigh pad rests on the measured top of the thigh instead of inside it. */}
+      {kind === 'seated_leg_curl' && <Axial r={r} at={add(kneeAxis, [0, .155 * h, -.11 * h])} axis={axis} radius={.068 * h} length={.51 * h} material="pad"/>}
     </>}
     {spec.handles?.map((at, i) => <React.Fragment key={i}><Tube r={r} a={add(spec.seat, [(Math.sign(at[0]) || 1) * .22 * h, 0, 0])} b={at} radius={.019 * h}/><Grip r={r} at={at} h={h} axis={[0, 0, 1]}/></React.Fragment>)}
   </group>;
@@ -333,7 +335,7 @@ export default function ExerciseEquipment({ motion, joints = [], rest = [], prog
     case 'bench_barbell': content = <><Bench r={r} spec={spec} rack/><Barbell r={r} spec={spec}/></>; break;
     case 'band_row': case 'band_pull_apart': content = <Bands r={r} spec={spec}/>; break;
     case 'machine_chest_press': case 'machine_row': content = <PressOrRowMachine r={r} spec={spec}/>; break;
-    case 'lat_pulldown': case 'cable_row': content = <><CableTower r={r} spec={spec} seated/><Cables r={r} spec={spec}/>{spec.kind === 'lat_pulldown' && <Axial r={r} at={add(spec.seat, [0, .16 * spec.h, .29 * spec.h])} radius={.065 * spec.h} length={.46 * spec.h} material="pad"/>}</>; break;
+    case 'lat_pulldown': case 'cable_row': content = <><CableTower r={r} spec={spec} seated/><Cables r={r} spec={spec}/>{spec.kind === 'lat_pulldown' && <Axial r={r} at={add(spec.seat, [0, .297 * spec.h, .29 * spec.h])} radius={.065 * spec.h} length={.46 * spec.h} material="pad"/>}</>; break;
     case 'cable_pushdown': case 'cable_face_pull': case 'cable_pallof': content = <><CableTower r={r} spec={spec}/><Cables r={r} spec={spec}/></>; break;
     case 'leg_press': case 'leg_extension': case 'seated_leg_curl': case 'machine_hip_abduction': content = <LegMachine r={r} spec={spec} joints={joints}/>; break;
     case 'treadmill_walk': content = <Treadmill r={r} spec={spec}/>; break;

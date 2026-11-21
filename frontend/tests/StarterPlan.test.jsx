@@ -32,3 +32,14 @@ it('server mode guides the user to measurement entry instead of a dead-end error
  expect(screen.getByRole('link',{name:'체성분 입력하기'}).getAttribute('href')).toBe('/health/profile#measurement-entry');
  expect(screen.queryByText('다시 시도')).toBeNull();
 });
+
+it('workout screen creates a plan in one tap instead of sending the user elsewhere',async()=>{
+ const WorkoutPage=(await import('../src/health/pages/WorkoutPage.jsx')).default;
+ let created=false;
+ const routine={id:'R1',created_at:'2026-01-01T00:00:00Z',goal:'기본 체력 관리',summary:'',days_per_week:1,exercises:[]};
+ mockFetch({'/api/exercise-routines/generate':()=>{created=true;return routine;},'/api/exercise-routines':()=>created?[routine]:[],'/api/workouts':[],'/api/body-composition/latest':{status:404,body:{detail:'none'}}});
+ render(<MemoryRouter><WorkoutPage/></MemoryRouter>);
+ await userEvent.click(await screen.findByRole('button',{name:'운동 계획 바로 만들기'}));
+ await vi.waitFor(()=>expect(screen.queryByText('운동 루틴이 없어요')).toBeNull());
+ expect(created).toBe(true);
+});

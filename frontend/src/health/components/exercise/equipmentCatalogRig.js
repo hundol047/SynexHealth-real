@@ -223,7 +223,10 @@ export function equipmentCatalogPose(id, progress, rest) {
       const side = i === 0 ? 1 : -1, root = arm[i][0], shoulder = joints[root];
       if (id === 'curl' || id === 'hammer_curl') {
         const theta = .04 + 2.08 * e;
-        armFK(i, [side * .06, -.997, 0], [0, -Math.cos(theta), Math.sin(theta)]);
+        // Hanging dumbbell heads need room beside the thigh; the forearm returns to the
+        // sagittal plane as the elbow flexes. Straight-down forearms put the plates in the leg.
+        const clearance = (id === 'hammer_curl' ? .21 : .10) * (1 - e * e);
+        armFK(i, [side * .06, -.997, 0], [side * clearance, -Math.cos(theta), Math.sin(theta)]);
         if (id === 'hammer_curl') data.gripAxes = [0, 1].map(() => [0, Math.sin(theta), Math.cos(theta)]);
       } else if (id === 'shoulder_press') {
         setArm(i, [side * (.32 - .105 * e) * h, shoulder[1] + (-.015 + .42 * e) * h, shoulder[2] + .065 * h], [side, -1, 0]);

@@ -146,7 +146,7 @@ export function equipmentBounds(motion, joints = [], rest = [], heightScale) {
       handles.forEach((at, i) => { tube([pivots[i][0], .04 * h, pivots[i][2]], pivots[i], .027 * h); axial(pivots[i], [1, 0, 0], .047 * h, .06 * h); tube(pivots[i], at, .020 * h); grip(at, [0, 1, 0]); });
       break;
     }
-    case 'lat_pulldown': case 'cable_row': tower(true); cables(); if (kind === 'lat_pulldown') axial(add(s.seat, [0, .16 * h, .29 * h]), [1, 0, 0], .065 * h, .46 * h); break;
+    case 'lat_pulldown': case 'cable_row': tower(true); cables(); if (kind === 'lat_pulldown') axial(add(s.seat, [0, .297 * h, .29 * h]), [1, 0, 0], .065 * h, .46 * h); break;
     case 'cable_pushdown': case 'cable_face_pull': case 'cable_pallof': tower(false); cables(); break;
     case 'leg_press': case 'leg_extension': case 'seated_leg_curl': case 'machine_hip_abduction': {
       machineFrame();
@@ -173,8 +173,8 @@ export function equipmentBounds(motion, joints = [], rest = [], heightScale) {
       else {
         axial(roller, [1, 0, 0], .065 * h, .53 * h);
         for (const x of [-1, 1]) tube([x * .26 * h, knee[1], knee[2]], add(roller, [x * .26 * h, 0, 0]), .021 * h);
-        axial(knee, [1, 0, 0], .048 * h, .55 * h);
-        if (kind === 'seated_leg_curl') axial(add(knee, [0, .07 * h, -.11 * h]), [1, 0, 0], .068 * h, .51 * h);
+        for (const x of [-1, 1]) axial(add(knee, [x * .262 * h, 0, 0]), [1, 0, 0], .048 * h, .05 * h);
+        if (kind === 'seated_leg_curl') axial(add(knee, [0, .155 * h, -.11 * h]), [1, 0, 0], .068 * h, .51 * h);
       }
       for (const at of handles) { tube(add(s.seat, [(Math.sign(at[0]) || 1) * .22 * h, 0, 0]), at, .019 * h); grip(at, [0, 0, 1]); }
       break;
