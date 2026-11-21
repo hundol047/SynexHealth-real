@@ -135,3 +135,24 @@ def test_api_documentation_is_not_published_in_production():
     out = subprocess.run([sys.executable, '-c', "import os\nfrom app.services import release_config\nrelease_config.validate_production=lambda env=None:None\n" + code],
                          capture_output=True, text=True, env=pilot_env)
     assert out.stdout.strip() == '[]', out.stderr[-400:]
+
+
+def test_review_login_locks_after_repeated_wrong_passwords(monkeypatch):
+    import hashlib
+    from fastapi import HTTPException
+    from app.services import review_access
+    monkeypatch.setenv('APP_REVIEW_MODE', 'true'); monkeypatch.setenv('APP_REVIEW_USERNAME', 'reviewer'); monkeypatch.setenv('APP_REVIEW_SALT', 'salt')
+    monkeypatch.setenv('APP_REVIEW_PASSWORD_HASH', hashlib.pbkdf2_hmac('sha256', b'correct horse', b'salt', 600000).hex())
+    review_access.FAILURES.clear()
+    for _ in range(review_access.MAX_FAILURES):
+        try:
+            review_access.review(review_access.Login(username='reviewer', password='wrong'))
+        except HTTPException as error:
+            assert error.status_code == 401
+    # Even the right password is refused while locked, from any address.
+    try:
+        review_access.review(review_access.Login(username='reviewer', password='correct horse'))
+        raise AssertionError('expected lock')
+    except HTTPException as error:
+        assert error.status_code == 429
+    review_access.FAILURES.clear()

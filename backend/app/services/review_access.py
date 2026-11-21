@@ -4,15 +4,21 @@ from fastapi import APIRouter,HTTPException,Depends,Response,Header
 from pydantic import BaseModel,Field
 from .auth import create_auth_session,get_current_user,AUTH_SESSIONS,User
 router=APIRouter(prefix='/api/auth')
+FAILURES=[];MAX_FAILURES=10;LOCK_WINDOW=900
 class Login(BaseModel):
  username:str=Field(max_length=200)
  password:str=Field(max_length=200)
 @router.post('/review')
 def review(req:Login):
  if os.getenv('APP_REVIEW_MODE')!='true':raise HTTPException(404)
+ # Password guessing is stopped for everyone, not per address: a guesser can change addresses.
+ now=time.time();FAILURES[:]=[t for t in FAILURES if now-t<LOCK_WINDOW]
+ if len(FAILURES)>=MAX_FAILURES:raise HTTPException(429,'로그인 시도가 많습니다. 15분 뒤에 다시 시도하세요.',headers={'Retry-After':str(LOCK_WINDOW)})
  salt=os.getenv('APP_REVIEW_SALT','');expected=os.getenv('APP_REVIEW_PASSWORD_HASH','')
  digest=hashlib.pbkdf2_hmac('sha256',req.password.encode(),salt.encode(),600000).hex()
- if not expected or not hmac.compare_digest(req.username,os.getenv('APP_REVIEW_USERNAME','')) or not hmac.compare_digest(digest,expected):raise HTTPException(401,'로그인 정보를 확인하세요.')
+ if not expected or not hmac.compare_digest(req.username.encode(),os.getenv('APP_REVIEW_USERNAME','').encode()) or not hmac.compare_digest(digest,expected):
+  FAILURES.append(time.time());raise HTTPException(401,'로그인 정보를 확인하세요.')
+ FAILURES.clear()
  from ..health.router import store
  from ..health.schemas import HealthUser,ExerciseProfile
  from ..health.providers.mock import MockProvider

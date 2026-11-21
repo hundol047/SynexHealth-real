@@ -3,7 +3,6 @@ import React, { lazy, Suspense } from 'react';
 import { createBrowserRouter, createRoutesFromElements, RouterProvider, Outlet, Route, Navigate } from 'react-router-dom';
 import UnsavedChangesGuard from './shared/components/UnsavedChangesGuard.jsx';
 import Layout from './shared/components/Layout.jsx';
-import AppLockGate from './shared/components/AppLock.jsx';
 
 const DiagnosticsPage = lazy(() => import('./health/pages/DiagnosticsPage.jsx'));
 const SubscriptionPage = lazy(() => import('./health/pages/SubscriptionPage.jsx'));
@@ -32,7 +31,7 @@ const AdminPage = lazy(() => import('./health/pages/AdminPage.jsx'));
 const ConnectionsPage = lazy(() => import('./health/pages/ConnectionsPage.jsx'));
 
 function ServerFeature(){return <section className="card"><h1>서버 연결이 필요한 기능입니다</h1><p>개인용 안드로이드 모드에서는 학교 상담·AI 대화·구독 결제·원격 리포트를 사용하지 않습니다. 내 체성분, 3D 인체, 운동 안내와 기록은 이 폰에서 이용할 수 있습니다.</p></section>;}
-function AppShell(){return <AppLockGate><UnsavedChangesGuard/><Layout><Suspense fallback={<p role="status">화면을 불러오는 중입니다.</p>}><Outlet/></Suspense></Layout></AppLockGate>;}
+function AppShell(){return <><UnsavedChangesGuard/><Layout><Suspense fallback={<p role="status">화면을 불러오는 중입니다.</p>}><Outlet/></Suspense></Layout></>;}
 let router;
 export default function App(){
  if(!router)router=createBrowserRouter(createRoutesFromElements(<Route element={<AppShell/>}>
