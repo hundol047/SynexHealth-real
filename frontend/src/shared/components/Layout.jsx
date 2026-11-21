@@ -1,6 +1,7 @@
 import {LOCAL_ONLY} from '../lib/localMode.js';
 import {BUILD_LABEL,UI_REVISION} from '../lib/buildInfo.js';
 import PendingWorkouts from './PendingWorkouts.jsx';
+import appLogo from '../assets/app-logo.webp';
 import { useAuth } from './AuthBoundary.jsx';
 import React, { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
@@ -54,7 +55,7 @@ export default function Layout({ children }) {
     <div className={`health-shell ${auth.local?'device-personal':''} ${pathname==='/health/pose'?'health-shell-pose':''}`}>
       <header className="health-topbar">
         <div className="health-brand">
-          <span className="health-brand-icon">SH</span>
+          <img className="health-brand-icon" src={appLogo} alt="" width="32" height="32"/>
           Synex <span style={{ color: 'var(--blue)' }}>Health</span>{!auth.local&&<small className="build-badge" title={UI_REVISION}>{BUILD_LABEL} · v2</small>}
         </div>
         <nav className="health-desktop-nav">

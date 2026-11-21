@@ -303,3 +303,4 @@ small{font-size:.8125rem}
 .workout-jump{margin-bottom:12px}
 .section-jump-chip.is-done{background:var(--blue-pale);color:var(--success);border-color:transparent}
 .exercise-card{scroll-margin-top:76px}
+img.health-brand-icon{display:block;object-fit:cover;background:none;flex:none}
