@@ -195,6 +195,12 @@ export function exerciseMaterials(character,faceAtlas=null) {
         ${character.body==='female'&&character.face==='refined'?`// Suppress baked socket shadows without erasing lip/cheek texture detail.
         float socket=exp(-pow((ax-.032)/.024,2.)-pow((y-1.663)/.019,2.))*smoothstep(.10,.13,z);
         float localContrast=characterFaceContrast*mix(1.,.48,socket);`:'float localContrast=characterFaceContrast;'}
+        // The source skin has saturated red eyelid rims and lips that read as sore or
+        // made-up at this size. Keep their shading, pull their colour toward the skin.
+        float rim=exp(-pow((ax-.033)/.024,2.)-pow((y-1.663)/.013,2.))*smoothstep(.10,.125,z);
+        float lips=exp(-pow(ax/.034,4.)-pow((y-1.595)/.012,2.))*smoothstep(.10,.125,z);
+        float detailLuma=dot(faceDetail,vec3(.30,.59,.11));
+        faceDetail=mix(faceDetail,vec3(detailLuma)*vec3(1.035,.985,.97),clamp(rim*.72+lips*.42,0.,.8));
         diffuseColor.rgb*=mix(vec3(1.),faceDetail,faceBlend*localContrast);`:''}
         float sleeve=((ax-.185)*.14-(y-1.42)*.17)/(.14*.14+.17*.17);
         float neck=min(1.543,1.511-.022*clamp((z-.02)/.07,0.,1.)+.048*min(1.,pow(ax/.1,2.)));
@@ -234,7 +240,7 @@ export function exerciseMaterials(character,faceAtlas=null) {
         roughnessFactor=mix(roughnessFactor,.68-tZone,facialSkin);
       `);
     };
-    material.customProgramCacheKey=()=>`face-atlas-v10-${Boolean(faceAtlas)}-${character.body}-${character.face}-${character.outfit}-${character.pants}`;
+    material.customProgramCacheKey=()=>`face-atlas-v11-${Boolean(faceAtlas)}-${character.body}-${character.face}-${character.outfit}-${character.pants}`;
   }
   let disposed = false;
   return { materials, dispose: () => {

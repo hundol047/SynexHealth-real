@@ -10,6 +10,15 @@ it('keeps all heights and mesh topology intact at both cosmetic extremes',()=>{
  for(const gender of ['male','female'])for(const sign of [-1,1]){
  const base=personalizedVertices({}, {gender}),original=base.slice();const out=characterSurface(base,{body:gender,chest:sign,hips:sign,waist:sign,shoulders:sign,style:'toon',face:'soft'});
  expect(base).toEqual(original);expect(out.length).toBe(base.length);expect(out.every(Number.isFinite)).toBe(true);
- for(let i=0;i<out.length;i+=3){expect(out[i+1]).toBe(base[i+1]);expect(Math.abs(out[i]-base[i])).toBeLessThan(.025);expect(Math.abs(out[i+2]-base[i+2])).toBeLessThan(.02);}
+ let moved=0;
+ for(let i=0;i<out.length;i+=3){
+  // Only the resting expression may move a height, and only around the mouth and cheeks.
+  const expression=base[i+1]>1.56&&base[i+1]<1.65&&base[i+2]>.085;
+  if(expression){expect(Math.abs(out[i+1]-base[i+1])).toBeLessThan(.005);if(out[i+1]>base[i+1]+.002)moved++;}
+  else expect(out[i+1]).toBe(base[i+1]);
+  expect(Math.abs(out[i]-base[i])).toBeLessThan(.025);expect(Math.abs(out[i+2]-base[i+2])).toBeLessThan(.02);
+ }
+ // The mouth corners are actually lifted (a frown is the source head's resting shape).
+ expect(moved).toBeGreaterThan(4);
  }
 });

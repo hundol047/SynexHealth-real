@@ -21,6 +21,7 @@ export function eyeProportions(value=0,character){
  const amount=Number.isFinite(value)?Math.max(-1,Math.min(1,value)):0;
  return [1+.15*amount,1+.25*amount,1];
 }
+const SMILE=Object.freeze({lift:.0038,cheek:.0012,widen:.0014});
 export function characterSurface(base,options,scale=1){
  const c=normalizeCharacter(options),out=base.slice();
  if(c.body==='female'&&c.face==='refined'){
@@ -49,6 +50,15 @@ export function characterSurface(base,options,scale=1){
    out[i+2]-=.0015*nose*scale;
    const front=Math.min(1,Math.max(0,(z-.10)/.04));
    out[i+1]+=.0014*bell(Math.abs(x),.024,.013)*bell(y,1.607,.009)*front*scale;
+  }
+  // Resting expression. The source head's mouth corners sit below the lip line, which
+  // reads as a frown; lift the corners and the cheeks above them into a relaxed, friendly face.
+  if(y>1.56&&y<1.65&&z>.085){
+   // Measured on the source head: mouth line y=1.594, lips 1.584-1.606, nose tip 1.626.
+   const ax=Math.abs(x),corner=bell(ax,.026,.010)*bell(y,1.594,.009),cheek=bell(ax,.040,.016)*bell(y,1.614,.015);
+   out[i+1]+=(SMILE.lift*corner+SMILE.cheek*cheek)*scale;
+   out[i]+=Math.sign(x)*SMILE.widen*corner*scale;
+   out[i+2]+=(SMILE.cheek*.6*cheek-SMILE.widen*.8*corner)*scale;
   }
   if(y>1.55&&y<1.76){const face=bell(y,1.63,.06);out[i]*=1+face*(c.face==='soft'?.055:c.face==='angular'?-.055:0);if(c.style==='toon')out[i]*=1+.045*face;}
  }
