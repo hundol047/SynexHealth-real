@@ -266,8 +266,10 @@ export function fitExerciseClothing(wear,scale,character){
    positions[i]+=Math.sign(x)*.002*weight*scale;
   }
   if(character.pants==='joggers'&&y>.17&&y<.94&&Math.abs(x)<.3){
-   const center=Math.sign(x)*(.10+Math.max(0,.9-y)*.11),t=Math.sin((y-.17)/.77*Math.PI);
-   positions[i]+=(x-center)*.22*t;positions[i+2]+=(z-.04)*.16*t;
+   // Joggers hang a little loose from the thigh and taper to the cuff. The former 22 % swell
+   // peaked at the knee and read as ballooned thighs rather than fabric.
+   const center=Math.sign(x)*(.10+Math.max(0,.9-y)*.11),t=Math.sin((y-.17)/.77*Math.PI)*THREE.MathUtils.smoothstep(y,.17,.62);
+   positions[i]+=(x-center)*.08*t;positions[i+2]+=(z-.04)*.06*t;
   }
  }
  return {...wear,positions};
