@@ -10,6 +10,8 @@ test('reviewed Korean centers are searchable offline at 360px with qualified mea
   await page.goto('/health/connections#university-centers');
   const directory=page.locator('#university-centers');
   await expect(directory).toBeInViewport();
+  await expect(directory.getByRole('article')).toHaveCount(5);
+  await directory.getByRole('button',{name:/곳 더 보기$/}).click();
   await expect(directory.getByRole('article')).toHaveCount(centers.length);
   await expect(directory).toContainText('대한민국 전체 대학 목록이나 데이터 연동 제휴 목록은 아닙니다');
   await context.setOffline(true);

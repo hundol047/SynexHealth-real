@@ -8,6 +8,7 @@ test('mobile replacement, set recording and weekly progress round trip',async({p
  const old=await generated.json();let selected;
  for(const e of old.exercises){const r=await page.request.get(`/api/exercise-routines/${old.id}/alternatives/${e.exercise_id}`);if((await r.json()).length){selected=e;break;}}
  expect(selected).toBeTruthy();await page.reload();
+ if(selected.day_number!==Math.min(...old.exercises.map(e=>e.day_number)))await page.locator('section.card').filter({hasText:`${selected.day_number}일차 · `}).getByRole('button',{name:/^운동 \d+개 보기$/}).click();
  const card=page.locator(`[id="${selected.exercise_id}"]`);
  await card.getByRole('button',{name:'이 운동 교체하기'}).click();
  const options=card.getByLabel('대체 운동');await expect(options.locator('option')).not.toHaveCount(1);
@@ -23,6 +24,7 @@ test('mobile replacement, set recording and weekly progress round trip',async({p
  await exercise.getByLabel('운동 힘듦 (RPE 1–10)',{exact:true}).fill('7');
  await exercise.getByRole('button',{name:'완료 기록',exact:true}).click();await expect(exercise.getByText('오늘 완료',{exact:true})).toBeVisible();
  await page.reload();await expect(page.getByLabel('1세트 중량 kg',{exact:true})).toHaveValue('20');
+ await page.getByRole('button',{name:/기록 열기$/}).click();
  await page.getByLabel('1세트 중량 kg',{exact:true}).fill('22');
  await page.getByRole('button',{name:'기록 수정',exact:true}).click();
  await expect(page.getByText('완료 기록을 저장했습니다.',{exact:true})).toBeVisible();
@@ -32,6 +34,8 @@ test('mobile replacement, set recording and weekly progress round trip',async({p
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),JSON.stringify(overflow)).toBe(true);
  await page.screenshot({path:info.outputPath('sets-mobile.png'),fullPage:true});
  await page.goto('/health/progress');await expect(page.getByRole('heading',{name:'운동 성장 기록'})).toBeVisible();
+ await expect(page.getByText('이번 주 중량×횟수',{exact:true})).toBeVisible();
+ await page.getByText('주별 기록 자세히 보기',{exact:true}).click();
  await expect(page.getByRole('table',{name:'주간 활동과 기록된 외부 중량 운동량'})).toContainText('264 kg·회');
  await page.screenshot({path:info.outputPath('training-progress-mobile.png'),fullPage:true});
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);

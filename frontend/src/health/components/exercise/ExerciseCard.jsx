@@ -32,8 +32,7 @@ export default function ExerciseCard({ exercise, children, paused=false, focused
       <div className="exercise-inline-demo-heading"><strong>{exercise.exercise_name}</strong><button className="btn btn-secondary" type="button" onClick={closeDemo}>시범 접기</button></div>
       <Suspense fallback={<p role="status">동작을 불러오는 중입니다.</p>}><ExerciseMotion autoPlay exercise={exercise} paused={paused} onReady={revealDemo}/></Suspense>
     </section>}
-    <span className="badge">{cameraSupported?'카메라 자세 코칭 지원':'동작 시범 제공'}</span>
-    <details open={!focused&&!open}><summary>운동 설명</summary><ul className="exercise-cues">{(exercise.instructions||[]).slice(0,2).map(t=><li key={t}>{t}</li>)}</ul>
+    <details className="exercise-explain"><summary>운동 설명</summary><ul className="exercise-cues">{(exercise.instructions||[]).slice(0,2).map(t=><li key={t}>{t}</li>)}</ul>
     <p className="muted exercise-reason">{exercise.reason}</p></details>
     {recordingMotion&&<button type="button" className="btn btn-secondary" aria-expanded={camera} onClick={()=>setCamera(v=>!v)}>{camera?'촬영 화면 닫기':cameraSupported?'동영상 촬영·자세 교정 열기':'동영상 촬영 열기'}</button>}
     {camera&&recordingMotion&&<Suspense fallback={<p>카메라 화면 준비 중…</p>}><CameraCoaching standaloneSession={!focused} exercise={exercise} onEvaluation={onPoseEvaluation} key={exercise.exercise_id||exercise.motion_id} motion={recordingMotion} paused={paused}/></Suspense>}

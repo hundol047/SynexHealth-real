@@ -132,9 +132,8 @@ export default function ProfilePage() {
     <>
 <Link className="btn btn-secondary" to="/health/character">내 운동 캐릭터 꾸미기</Link>
 
-      <nav className="section-jump" aria-label="프로필 바로가기">{[['measurement-entry','체성분 입력'],['profile-info','내 정보'],['profile-goals','운동 목표'],['profile-safety','안전 문진']].map(([id,label])=><button type="button" key={id} className="section-jump-chip" onClick={()=>document.getElementById(id)?.scrollIntoView?.({behavior:'smooth',block:'start'})}>{label}</button>)}</nav>
+      <nav className="section-jump" aria-label="프로필 바로가기">{[['measurement-entry','체성분 입력'],['profile-info','내 정보'],['profile-goals','운동 목표'],['profile-safety','안전 문진'],['school-connection','학교']].map(([id,label])=><button type="button" key={id} className="section-jump-chip" onClick={()=>document.getElementById(id)?.scrollIntoView?.({behavior:'smooth',block:'start'})}>{label}</button>)}</nav>
       <section className="card"><h2>나의 건강 메뉴</h2><div className="membership-actions"><Link className="btn btn-ghost" to="/health/goals">목표</Link>{!LOCAL_ONLY&&<Link className="btn btn-ghost" to="/health/subscription">멤버십</Link>}<Link className="btn btn-ghost" to="/health/library">운동 라이브러리</Link><Link className="btn btn-ghost" to="/health/pose">운동 카메라 코치</Link><Link className="btn btn-ghost" to="/health/connections">학교·기기·알림 연결</Link><Link className="btn btn-ghost" to="/health/privacy">개인정보 관리</Link></div><div className="membership-actions"><Link className="btn btn-ghost" to="/health/workout">운동 기록</Link><Link className="btn btn-ghost" to="/health/progress">변화 추적</Link><Link className="btn btn-ghost" to="/health/comparison">측정 비교</Link>{!LOCAL_ONLY&&<Link className="btn btn-ghost" to="/health/agent">AI 코치</Link>}{!LOCAL_ONLY&&<Link className="btn btn-ghost" to="/health/report">월별 리포트</Link>}</div></section>
-      <SchoolSelector profile={profile.data} onSaved={profile.reload}/>
       <MeasurementEntry />
       <div onChangeCapture={()=>{setDirty(true);setSaved(false);}}><fieldset disabled={saving} style={{border:0,padding:0,minWidth:0}}><Card id="profile-info" title="내 정보">
         <div className="profile-grid">
@@ -190,8 +189,9 @@ export default function ProfilePage() {
           </div>
         </div>
 
+        {form.training_mode==='bodyweight'?<p className="muted" style={{marginTop:14}}>맨몸운동만 선택해서 기구 목록은 숨겼어요. 운동 방식을 바꾸면 기구를 고를 수 있습니다.</p>:
         <div style={{ marginTop: 14 }}>
-          <label className="field-label">실제로 이용할 수 있는 운동 기구</label><p className="muted">맨몸운동만 선택하면 기구 설정과 관계없이 맨몸으로 구성합니다. 머신은 이용할 종류를 각각 선택하세요.</p>
+          <label className="field-label">실제로 이용할 수 있는 운동 기구</label><p className="muted">가진 기구만 고르세요. 머신은 이용할 종류를 각각 선택합니다.</p>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
             {EQUIPMENT_OPTIONS.map((o) => (
               <label key={o.value} className={`chip-checkbox ${equipmentSet.has(o.value) ? 'checked' : ''}`}>
@@ -200,7 +200,7 @@ export default function ProfilePage() {
               </label>
             ))}
           </div>
-        </div>
+        </div>}
 
         <div style={{ marginTop: 14 }}>
           <label className="field-label" htmlFor="limitations-input">제약 사항 (쉼표로 구분)</label>
@@ -233,6 +233,8 @@ export default function ProfilePage() {
       {saveError && <ErrorState message={saveError.message} onRetry={save} />}
       {saved && <p className="muted">저장되었습니다.</p>}
       <button className="btn btn-primary btn-block" onClick={save} disabled={saving}>{saving ? '저장 중...' : '저장하기'}</button></fieldset></div>
+      {/* School affiliation is optional and long, so it follows what everyone fills in. */}
+      <SchoolSelector profile={profile.data} onSaved={profile.reload}/>
     </>
   );
 }

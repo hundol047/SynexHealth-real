@@ -23,6 +23,8 @@ export default function RoutinePage() {
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState(null);
   const [safetyBlocked, setSafetyBlocked] = useState(false);
+  // Three days of fully expanded cards made this screen about eleven phone screens long.
+  const [dayOpen, setDayOpen] = useState({});
 
   async function generate() {
     setGenerating(true);
@@ -49,6 +51,8 @@ export default function RoutinePage() {
 
   const latest = (routines.data || [])[0];
   const days = latest ? groupByDay(latest.exercises) : [];
+  const isDayOpen = day => dayOpen[day] ?? day === days[0]?.[0];
+  const toggleDay = day => setDayOpen(current => ({ ...current, [day]: !isDayOpen(day) }));
 
   return (
     <>
@@ -109,13 +113,14 @@ export default function RoutinePage() {
               ["체지방률",latest.input_snapshot.body_fat_percent,"%"],["회당 가능 시간",latest.input_snapshot.profile?.minutes_per_session,"분"]]
               .map(([label,value,unit])=><div className="plan-stat" key={label}><span>{label}</span><strong>{value==null?'미입력':`${value}${unit}`}</strong></div>)}
           </div>}
-          {latest.rationale?.length > 0 && <><strong>나에게 이 운동을 추천한 이유</strong><ul className="plan-rationale">{latest.rationale.map(t=><li key={t}>{t}</li>)}</ul></>}
-          {latest.progression && <div className="motion-intensity"><strong>이번 계획의 조정</strong><p>{latest.progression}</p></div>}
-          <details style={{marginTop:16}}><summary>추천 기준과 확인할 사항</summary>
+          <details className="simple-details"><summary>추천 이유와 기준 보기</summary>
+            {latest.rationale?.length > 0 && <><strong>나에게 이 운동을 추천한 이유</strong><ul className="plan-rationale">{latest.rationale.map(t=><li key={t}>{t}</li>)}</ul></>}
+            {latest.progression && <div className="motion-intensity"><strong>이번 계획의 조정</strong><p>{latest.progression}</p></div>}
+            <strong>추천 기준과 확인할 사항</strong>
             <ul className="plan-notices">{(latest.notices||[]).map(t=><li key={t}>{t}</li>)}</ul>
             {latest.algorithm_version==='device-balanced-v2'&&<p>앱 구성 비교 참고 · 아래 자료는 의료·운동 처방의 근거가 아닙니다.</p>}<div className="plan-sources">{(latest.sources||[]).map(source=><a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.title}</a>)}</div>
+            <p className="muted" style={{fontSize:'.76rem',marginTop:12}}>검토 가능한 규칙 기반 맞춤 추천 · 새 측정값을 등록하면 기존 루틴을 자동 재검토합니다.</p>
           </details>
-          <p className="muted" style={{fontSize:'.76rem',marginTop:12}}>검토 가능한 규칙 기반 맞춤 추천 · 새 측정값을 등록하면 기존 루틴을 자동 재검토합니다.</p>
           <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
             <Badge>{latest.duration_weeks}주 프로그램</Badge>
             <Badge tone="blue">주 {latest.days_per_week}회</Badge>
@@ -128,9 +133,11 @@ export default function RoutinePage() {
         <Card key={day} title={`${day}일차 · ${exs.length}개 운동`} action={latest.day_minutes?.[String(day)] != null ? <Badge>약 {latest.day_minutes[String(day)]}분</Badge> : null}>
           {latest.day_timing?.[day]&&<div className="plan-stats" aria-label={`${day}일차 시간 구성`}><div className="plan-stat"><span>직접 준비운동</span><strong>{latest.day_timing[day].warmup_seconds}초</strong></div><div className="plan-stat"><span>실제 운동</span><strong>{Math.round(latest.day_timing[day].work_seconds/6)/10}분</strong></div><div className="plan-stat"><span>휴식·동작 전환</span><strong>{latest.day_timing[day].rest_seconds}초</strong></div></div>}
           <p className="muted">{latest.schedule?.[day-1] || '작은 시범으로 동작을 확인하고 자세히 보기를 눌러 확대하세요.'}</p>
-          {latest.day_timing?.[day]&&<p className="muted">시작 전 가벼운 걷기·제자리걷기로 준비하세요. 예상 시간은 기본 시범 속도 기준이며, 운동 후 자동 추천 스트레칭은 별도입니다. 몸 상태에 따라 쉬는 시간을 늘리거나 중단할 수 있습니다.</p>}
           {!latest.needs_review&&<Link className="btn btn-primary" to={`/health/workout?mode=tempo&day=${day}&routine=${encodeURIComponent(latest.id)}`}>{day}일차 루틴 시작</Link>}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <button type="button" className="btn btn-ghost day-toggle" aria-expanded={isDayOpen(day)} onClick={()=>toggleDay(day)}>{isDayOpen(day)?'운동 목록 접기':`운동 ${exs.length}개 보기`}</button>
+          {/* Closed days stay mounted so an open demonstration or replacement is not lost. */}
+          <div hidden={!isDayOpen(day)} style={{ display: isDayOpen(day)?'flex':'none', flexDirection: 'column', gap: 12 }}>
+            {latest.day_timing?.[day]&&<p className="muted">시작 전 가벼운 걷기·제자리걷기로 준비하세요. 예상 시간은 기본 시범 속도 기준이며, 운동 후 자동 추천 스트레칭은 별도입니다. 몸 상태에 따라 쉬는 시간을 늘리거나 중단할 수 있습니다.</p>}
             {exs.map((ex,i)=><ExerciseCard key={`${latest.id}-${ex.exercise_id||i}`} exercise={ex}><ExerciseReplacement routine={latest} exercise={ex} onReplaced={()=>Promise.all([routines.reload(),history.reload()])}/></ExerciseCard>)}
           </div>
         </Card>

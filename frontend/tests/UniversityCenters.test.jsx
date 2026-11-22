@@ -26,6 +26,17 @@ it('keeps every official destination within the reviewed campus sources and reje
   }
   expect(()=>officialCenterUrl('https://example.com')).toThrow();
 });
+it('shows a short preview until the person searches, filters or asks for the rest',()=>{
+  render(<UniversityCenters/>);
+  expect(screen.getAllByRole('article')).toHaveLength(5);
+  fireEvent.click(screen.getByRole('button',{name:/곳 더 보기$/}));
+  expect(screen.getAllByRole('article')).toHaveLength(UNIVERSITY_CENTERS.length);
+  fireEvent.click(screen.getByRole('button',{name:'목록 접기'}));
+  expect(screen.getAllByRole('article')).toHaveLength(5);
+  fireEvent.change(screen.getByRole('searchbox'),{target:{value:'춘천'}});
+  expect(screen.getAllByRole('article').length).toBeGreaterThan(1);
+  expect(screen.queryByRole('button',{name:/곳 더 보기$/})).toBeNull();
+});
 it('recovers from no search matches without claiming the school has no center',()=>{
   render(<UniversityCenters/>);
   fireEvent.change(screen.getByRole('searchbox'),{target:{value:'목록에없는학교'}});

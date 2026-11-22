@@ -4,10 +4,14 @@ import {UNIVERSITY_CENTERS,CENTER_SOURCES_CHECKED_ON,CENTER_KIND_LABELS,findUniv
 import OfficialCenterLink from './OfficialCenterLink.jsx';
 import './university-centers.css';
 
+const PREVIEW_COUNT=5;
 export default function UniversityCenters() {
   const [query,setQuery]=useState(''),[measurementOnly,setMeasurementOnly]=useState(false);
+  // 44 cards made this screen about 23 phone screens long. Show a few until the person searches or asks.
+  const [expanded,setExpanded]=useState(false);
   useEffect(()=>{if(window.location.hash==='#university-centers')document.getElementById('university-centers')?.scrollIntoView?.({block:'start'});},[]);
   const centers=findUniversityCenters(query,measurementOnly);
+  const showAll=expanded||!!query.trim()||measurementOnly,visible=showAll?centers:centers.slice(0,PREVIEW_COUNT);
   return <div id="university-centers"><Card title="국내 대학 센터 찾기" className="university-centers">
     <p>공식 안내를 직접 확인한 {new Set(UNIVERSITY_CENTERS.map(c=>c.university)).size}개 대학입니다. 대한민국 전체 대학 목록이나 데이터 연동 제휴 목록은 아닙니다.</p>
     <p className="university-center-notice">공식 안내는 외부 브라우저로 엽니다. 홈페이지를 열거나 학교를 선택해도 측정 기록은 자동으로 가져오지 않습니다.</p>
@@ -15,8 +19,8 @@ export default function UniversityCenters() {
     <label>대학·캠퍼스·지역 검색<input className="text-input" type="search" value={query} onChange={e=>setQuery(e.target.value)} placeholder="예: 서울대, 고려, 원주, 부산"/></label>
     <label className="university-center-filter"><input type="checkbox" checked={measurementOnly} onChange={e=>setMeasurementOnly(e.target.checked)}/>체성분 검사 안내가 있는 곳만</label>
     <p aria-live="polite">검색 결과 {centers.length}곳 · 목록 갱신일 {CENTER_SOURCES_CHECKED_ON}</p>
-    {!centers.length&&<div className="university-center-empty"><p>검색 조건에 맞는 확인된 센터가 없습니다. 목록에 없다는 이유로 해당 학교에 센터가 없다고 판단하지 않습니다.</p><button type="button" className="btn btn-ghost" onClick={()=>{setQuery('');setMeasurementOnly(false);}}>전체 확인 목록 보기</button></div>}
-    <div className="university-center-grid">{centers.map(center=><article key={center.id} className="university-center-card" aria-label={`${center.university} ${center.campus}`}>
+    {!centers.length&&<div className="university-center-empty"><p>검색 조건에 맞는 확인된 센터가 없습니다. 목록에 없다는 이유로 해당 학교에 센터가 없다고 판단하지 않습니다.</p><button type="button" className="btn btn-ghost" onClick={()=>{setQuery('');setMeasurementOnly(false);setExpanded(true);}}>전체 확인 목록 보기</button></div>}
+    <div className="university-center-grid">{visible.map(center=><article key={center.id} className="university-center-card" aria-label={`${center.university} ${center.campus}`}>
       <span className="university-center-region">{center.region} · {center.campus}</span>
       <h3>{center.university}</h3><strong>{center.center}</strong>
       <p className={`university-center-badge ${center.kind}`}>{CENTER_KIND_LABELS[center.kind]}</p>
@@ -24,6 +28,8 @@ export default function UniversityCenters() {
       <p className="university-center-source">출처: {center.sourceTitle} · 확인일 {center.checkedOn||CENTER_SOURCES_CHECKED_ON}</p>
       <OfficialCenterLink center={center}/>
     </article>)}</div>
+    {visible.length<centers.length&&<button type="button" className="btn btn-secondary university-center-more" onClick={()=>setExpanded(true)}>나머지 {centers.length-visible.length}곳 더 보기</button>}
+    {expanded&&!query.trim()&&!measurementOnly&&centers.length>PREVIEW_COUNT&&<button type="button" className="btn btn-ghost university-center-more" onClick={()=>setExpanded(false)}>목록 접기</button>}
     <div className="university-center-next"><h3>이미 결과지를 받았나요?</h3><p>전신 골격근량과 부위별 근육 분석 값을 입력하면 내 3D 신체 비교에 반영됩니다. 모르는 값은 비워두세요.</p><a className="btn btn-primary" href="/health/profile#segment-measurements">내 결과지 입력하기</a></div>
   </Card></div>;
 }

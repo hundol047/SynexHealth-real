@@ -305,3 +305,12 @@ small{font-size:.8125rem}
 .exercise-card{scroll-margin-top:76px}
 img.health-brand-icon{display:block;object-fit:cover;background:none;flex:none}
 img.health-brand-icon{border:1px solid var(--line);background:#fff}
+.day-toggle{width:100%;margin:10px 0}
+.exercise-card details>summary,.card details>summary{min-height:44px;display:flex;align-items:center;cursor:pointer}
+.exercise-card details>summary::before,.card details>summary::before{content:'▸';margin-right:8px;transition:transform .15s}
+.exercise-card details[open]>summary::before,.card details[open]>summary::before{transform:rotate(90deg)}
+.exercise-card details>summary::-webkit-details-marker,.card details>summary::-webkit-details-marker{display:none}
+.plan-sources a{display:flex;align-items:center;min-height:44px}
+.workout-done-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 8px 8px 14px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--blue-pale);font-weight:700;color:var(--success);font-size:.9rem}
+.workout-done-row .btn{min-height:40px;flex:none}
+#school-connection{scroll-margin-top:76px}
