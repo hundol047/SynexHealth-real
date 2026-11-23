@@ -230,8 +230,8 @@ it('keeps automatic preview at its first pose until the 3D renderer signals read
  const cancel=vi.spyOn(window,'cancelAnimationFrame').mockImplementation(()=>{});
  const {unmount}=render(<ExerciseMotion autoPlay exercise={{motion_id:'squat',exercise_name:'스쿼트',instructions:[],cautions:[]}}/>);
  try{
-  expect(screen.getByTestId('motion-render').dataset.progress).toBe('0');expect(nextFrame).toBeUndefined();expect(screen.getByText(/운동 시범을 준비하고 있습니다/)).toBeTruthy();
-  act(()=>readiness.ready());expect(screen.queryByText(/운동 시범을 준비하고 있습니다/)).toBeNull();
+  expect(screen.getByTestId('motion-render').dataset.progress).toBe('0');expect(nextFrame).toBeUndefined();
+  act(()=>readiness.ready());
   act(()=>nextFrame(0));act(()=>nextFrame(40));expect(Number(screen.getByTestId('motion-render').dataset.progress)).toBeGreaterThan(0);
  }finally{unmount();raf.mockRestore();cancel.mockRestore();readiness.hold=false;readiness.ready=null;}
 });

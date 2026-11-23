@@ -25,6 +25,7 @@ import {
 import { Card, PageHead, Field, Notice } from "./ui.jsx";
 import { useExerciseDisplay } from "../health/components/exercise/exerciseDisplay.js";
 import WorkoutDemo from "./WorkoutDemo.jsx";
+import { ExerciseThumbnail } from "../health/components/exercise/ExercisePreview.jsx";
 import { guidedExercise, usesSeconds, doseValue } from "./prescription.js";
 import { HealthAPI } from "../shared/lib/api.js";
 import { useApiData } from "../health/lib/useApiData.js";
@@ -85,6 +86,8 @@ export default function WorkoutSession() {
   const e = session.exercises[session.index];
   const source = exercises.find((x) => x.id === e.id);
   const demonstration = useMemo(() => guidedExercise(source, e), [source, e]);
+  // Warm the 3D demo bundle in the background so the first "동작 시범 보기" opens fast.
+  useEffect(() => { import("../health/components/exercise/ExerciseMotion.jsx"); }, []);
   const { done, total } = sessionSummary(session);
   const nextSet = nextIncompleteSet(session);
   const allDone = done === total;
@@ -292,6 +295,12 @@ export default function WorkoutSession() {
             </p>
           </div>
         </div>
+        {demonstration?.motion_id && (
+          <button type="button" className="gym-exercise-preview" onClick={() => setShowDemo(true)}
+            aria-haspopup="dialog" aria-label={`${e.name} 대표 자세 미리보기 · 눌러서 동작 시범 열기`}>
+            <ExerciseThumbnail exercise={demonstration}/>
+          </button>
+        )}
         <button
           className="gym-button secondary"
           disabled={!demonstration?.motion_id}

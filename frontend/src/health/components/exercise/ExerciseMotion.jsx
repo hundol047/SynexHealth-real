@@ -4,6 +4,7 @@ import { MOTIONS } from './motions.js';
 import { getMotionGuide, motionPhase } from './motionGuide.js';
 import { useExerciseDisplay, toggleExerciseDisplay, reportUnavailableRenderer } from './exerciseDisplay.js';
 import MotionFigure from './MotionFigure.jsx';
+import { ExerciseThumbnail } from './ExercisePreview.jsx';
 import './exercise-experience.css';
 import useTempoSession from './useTempoSession.js';
 import WorkoutResults from './WorkoutResults.jsx';
@@ -98,8 +99,7 @@ export default function ExerciseMotion({ exercise, measurement, profile, autoPla
   return <div className="motion-layout exercise-motion-experience">
     <div className="motion-viewer" ref={attachViewer}>
       <div className="motion-studio-heading"><div><span className="motion-studio-kicker">동작 가이드</span><strong>{dimension === '3d' ? '3D 동작 시범' : '2D 동작 시범'}</strong></div><span className="motion-studio-status"><i className={(playback?playback.running:playing) ? 'is-playing' : ''}/>{(playback?playback.running:playing) ? '재생 중' : '정지 화면'}</span></div>
-      {dimension==='3d'&&!sceneReady&&<p className="motion-loading" role="status">운동 시범을 준비하고 있습니다. 준비되면 처음 자세부터 시작합니다.</p>}
-      {dimension === '3d' ? <Suspense fallback={null}><ExerciseMotion3D onReady={markSceneReady} motion={exercise.motion_id} progress={progress} mirror={mirror} measurement={measurement} profile={profile} defaultView={guide?.defaultView} onFallback={reportUnavailableRenderer}/></Suspense> : <MotionFigure exercise={exercise} progress={progress} mirror={mirror}/>}
+      {dimension === '3d' ? <Suspense fallback={null}><ExerciseMotion3D onReady={markSceneReady} poster={<ExerciseThumbnail exercise={exercise}/>} motion={exercise.motion_id} progress={progress} mirror={mirror} measurement={measurement} profile={profile} defaultView={guide?.defaultView} onFallback={reportUnavailableRenderer}/></Suspense> : <MotionFigure exercise={exercise} progress={progress} mirror={mirror}/>}
       {!playback&&<div className="motion-playback-controls">
         <button className="btn btn-primary" type="button" disabled={paused} onClick={playPause}>{playing ? <Pause size={17} fill="currentColor"/> : <Play size={17} fill="currentColor"/>}{playing ? '일시정지' : '동작 재생'}</button>
         <button className="motion-icon-control" aria-label="처음 자세로" title="처음 자세로" type="button" onClick={() => setPhase(0)}><RotateCcw size={18}/></button>

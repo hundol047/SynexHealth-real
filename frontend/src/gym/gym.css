@@ -3271,3 +3271,7 @@
 .gym-question-form summary { cursor: pointer; padding: 14px 0; }
 .gym-workout-question { background: #eff5fc; border-left: 3px solid #3975ba; padding: 10px 14px; margin: 12px 0; border-radius: 4px; }
 .gym-workout-question p, .gym-answer-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Pose preview on each workout-session exercise card (no WebGL). */
+.gym-exercise-preview{display:block;width:100%;max-width:340px;margin:4px auto 0;padding:0;border:1px solid var(--coach-line,#dbe5f3);border-radius:14px;overflow:hidden;background:#f6fbf8;cursor:pointer}
+.gym-exercise-preview .exercise-thumbnail{display:block;width:100%;height:auto;aspect-ratio:280/270}
+.gym-exercise-preview:focus-visible{outline:2px solid var(--coach-blue,#2563eb);outline-offset:2px}

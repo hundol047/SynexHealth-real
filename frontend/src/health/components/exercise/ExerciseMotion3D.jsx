@@ -231,7 +231,7 @@ class SceneBoundary extends React.Component {
   render() { return this.state.failed ? this.props.fallback : this.props.children; }
 }
 
-export default function ExerciseMotion3D({ motion, progress, mirror, measurement, profile, compact = false, defaultView, fallbackContent, onReady, onFallback, character: overrideCharacter, highlight=true, faceFocus=false }) {
+export default function ExerciseMotion3D({ motion, progress, mirror, measurement, profile, compact = false, defaultView, fallbackContent, onReady, onFallback, poster, character: overrideCharacter, highlight=true, faceFocus=false }) {
   const controls = useRef();
   // Phones without WebGL, or that lose the context mid-workout, switch to the 2D guide
   // and remember it (onFallback) instead of leaving an empty stage.
@@ -251,6 +251,11 @@ export default function ExerciseMotion3D({ motion, progress, mirror, measurement
   const character = overrideCharacter || savedCharacter;
   const initialView = defaultView || (FLOOR_MOTIONS.test(motion) ? 'side' : '45');
   const [view, setView] = useState(initialView);
+  // Show the still pose thumbnail until the first real 3D frame has drawn, so
+  // opening a demonstration feels instant instead of showing a blank stage.
+  const [rendered, setRendered] = useState(false);
+  useEffect(() => setRendered(false), [motion]);
+  const markReady = () => { setRendered(true); onReady?.(); };
   const [appearance, setAppearance] = useState('athlete');
   const anatomy = mannequinGuide(motion);
   useEffect(() => setView(initialView), [motion, initialView,faceFocus]);
@@ -274,9 +279,10 @@ export default function ExerciseMotion3D({ motion, progress, mirror, measurement
     <div ref={stage} className="motion-3d-canvas" style={{ position: 'relative', height: compact ? undefined : 340, flex: compact ? '1 1 0' : undefined, minHeight: compact ? 0 : undefined, touchAction: 'none' }}>
       <SceneBoundary motion={motion} fallback={fallback}><React.Suspense fallback={<p className="motion-loading" role="status">캐릭터를 준비하고 있습니다.</p>}><Canvas shadows={!light} dpr={[1, software ? 1 : compact ? 1.5 : 2]} frameloop="demand" gl={{ antialias: !software, alpha: true, powerPreference: 'low-power' }} camera={{ position: [3, 1.5, 3], fov: 36 }} fallback={fallback} aria-label={appearance === 'mannequin' ? '운동 부위를 강조한 3D 운동 시범' : '운동복을 입은 3D 운동 시범'}>
         <SceneCamera motion={motion} view={view} mirror={mirror} heightScale={heightScale} controls={controls} faceFocus={faceFocus}/><Studio light={light} software={software} heightScale={heightScale} motion={motion} portrait={faceFocus}/>
-        <Athlete {...{ motion, progress, mirror, compact, light, appearance, onReady, character, highlight }} measurement={m} profile={p}/>
+        <Athlete {...{ motion, progress, mirror, compact, light, appearance, character, highlight }} onReady={markReady} measurement={m} profile={p}/>
         <OrbitControls ref={controls} enabled={view === 'free'} enablePan={false} minDistance={(faceFocus ? .38 : 1.2) * heightScale} maxDistance={(faceFocus ? .95 : 6) * heightScale} maxPolarAngle={Math.PI / 2 - .02}/>
       </Canvas></React.Suspense></SceneBoundary>
+      {poster && !rendered && <div className="motion-canvas-poster" aria-hidden="true">{poster}</div>}
       {compact && highlight && anatomy.primary.length > 0 && <span className="motion-anatomy-badge" title={`주요 부위: ${anatomy.primaryLabel}. 운동 안내이며 실제 근육 사용량 측정이 아닙니다.`}>빨강 · 주요 운동 부위</span>}
     </div>
     {!compact && highlight && <div className="motion-anatomy-legend" aria-label="운동 부위 색상 안내">
