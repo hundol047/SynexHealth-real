@@ -69,7 +69,7 @@ export default function BodyScene({gender='unspecified',segmentColors,onSelect,s
     </Suspense>
     {mannequin&&interactive&&<div className="mannequin-scene-key" aria-label="3D 비교 색상과 골격근량">
       {mannequin.options.showMy&&<span className="own"><i/>내 몸 <strong>{Number.isFinite(measurement?.skeletal_muscle_mass)?Number(measurement.skeletal_muscle_mass.toFixed(2))+' kg':'—'}</strong></span>}
-      {mannequin.options.showReference&&mannequin.referenceMeasurement&&<span className="reference"><i/>평균 <strong>{Number.isFinite(mannequin.referenceMeasurement.skeletal_muscle_mass)?Number(mannequin.referenceMeasurement.skeletal_muscle_mass.toFixed(2))+' kg':'—'}</strong></span>}
+      {mannequin.options.showReference&&mannequin.referenceMeasurement&&<span className="reference"><i/>{mannequin.referenceLabel||'평균'} <strong>{Number.isFinite(mannequin.referenceMeasurement.skeletal_muscle_mass)?Number(mannequin.referenceMeasurement.skeletal_muscle_mass.toFixed(2))+' kg':'—'}</strong></span>}
     </div>}
     {interactive&&<div style={{position:'absolute',bottom:10,left:0,right:0,textAlign:'center',pointerEvents:'none',fontSize:'.73rem',color:mannequin?'#4e6268':'#536172'}}>드래그로 회전 · 두 손가락으로 확대 · 부위 터치로 선택</div>}
   </div>;

@@ -36,3 +36,13 @@ describe('balanced device routines',()=>{
   expect(buildTempoPlan([{motion_id:'walk',duration:'10분'}]).reduce((s,x)=>s+x.durationMs,0)).toBe(605000);
  });
 });
+
+describe('limitations in device routines',()=>{
+ it('keeps every setting buildable while excluding each limited part',()=>{
+  for(const part of ['knee','back','shoulder','wrist','hip','ankle','elbow'])for(const days_per_week of [1,3,5,7])for(const minutes_per_session of [10,30])for(const exercise_location of ['home','gym','outdoor']){
+   const result=balancedLocalDays({...base,days_per_week,minutes_per_session,exercise_location},{gentle:true,avoid:[part]});
+   expect(result.exercises.length).toBeGreaterThan(0);
+   expect(result.exercises.every(e=>!catalog.find(c=>c.id===e.motion_id).avoid.includes(part))).toBe(true);
+  }
+ });
+});

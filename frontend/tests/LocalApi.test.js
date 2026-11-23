@@ -66,3 +66,20 @@ it('requires regenerating legacy routines without losing health or workout recor
  expect(next).toMatchObject({algorithm_version:'device-balanced-v2',needs_review:false});
  expect((await localApi('/api/body-composition/latest')).weight).toBe(60);
 });
+it('builds a routine around known limitations like the server and blocks only out-of-scope ones',async()=>{
+ const catalog=(await import('../src/shared/lib/localCatalog.json')).default;
+ await localApi('/api/body-composition',measurement);
+ for(const [text,part] of [['무릎 통증','knee'],['허리 디스크','back'],['어깨','shoulder']]){
+  await localApi('/api/exercise-profile',{limitations:[text]},{method:'PUT'});
+  const r=await localApi('/api/exercise-routines/generate',{});
+  expect(r.exercises.length).toBeGreaterThan(0);
+  expect(r.exercises.every(e=>!catalog.find(c=>c.id===e.motion_id).avoid.includes(part))).toBe(true);
+  expect(r.notices.some(n=>n.includes('제약 부위'))).toBe(true);
+ }
+ await localApi('/api/exercise-profile',{limitations:['없음']},{method:'PUT'});
+ expect((await localApi('/api/exercise-routines/generate',{})).notices.some(n=>n.includes('제약 부위'))).toBe(false);
+ for(const text of ['무릎 수술 후 재활','심장 질환','잘 모르겠음']){
+  await localApi('/api/exercise-profile',{limitations:[text]},{method:'PUT'});
+  await expect(localApi('/api/exercise-routines/generate',{})).rejects.toMatchObject({status:409});
+ }
+});

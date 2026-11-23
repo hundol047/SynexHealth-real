@@ -7,8 +7,8 @@ const preferred=['sit_stand','wall_push','scapular','bridge','dead_bug','walk'];
 const weekdays={1:[1],2:[1,4],3:[1,3,5],4:[1,2,4,6],5:[1,2,3,5,6],6:[1,2,3,4,5,6],7:[1,2,3,4,5,6,7]};
 const strengthSlots={1:[0],2:[0,1],3:[0,1,2],4:[0,2,3],5:[0,2,4],6:[0,2,4],7:[0,2,4]};
 const seconds=exercises=>Math.ceil(buildTempoPlan(exercises).reduce((sum,s)=>sum+s.durationMs,0)/1000);
-export function balancedLocalDays(profile,{gentle=false,cautious=false,fatGoal=false}={}){
- const allowed=catalog.filter(x=>x.auto_recommend!==false&&x.difficulty!=='advanced'&&x.locations.includes(profile.exercise_location)&&x.equipment.every(k=>profile.available_equipment.includes(k))&&(profile.training_mode!=='bodyweight'||!x.equipment.length));
+export function balancedLocalDays(profile,{gentle=false,cautious=false,fatGoal=false,avoid=[]}={}){
+ const allowed=catalog.filter(x=>x.auto_recommend!==false&&x.difficulty!=='advanced'&&x.locations.includes(profile.exercise_location)&&x.equipment.every(k=>profile.available_equipment.includes(k))&&(profile.training_mode!=='bodyweight'||!x.equipment.length)&&!(x.avoid||[]).some(k=>avoid.includes(k)));
  const pick=(pattern,variation=0)=>{
   let candidates=allowed.filter(x=>x.pattern===pattern);
   if(gentle&&candidates.some(x=>x.easy))candidates=candidates.filter(x=>x.easy);
@@ -27,7 +27,8 @@ export function balancedLocalDays(profile,{gentle=false,cautious=false,fatGoal=f
   let moves;
   if(strength){
    moves=patterns.map(pattern=>pick(pattern,variation)).filter(Boolean).map(x=>exercise(x,day));
-   if(moves.length<4)throw Error('현재 장소·장비로 균형 잡힌 루틴을 만들 수 없습니다. 운동 조건을 확인하세요.');
+   // A limitation may remove whole patterns (e.g. back excludes every hinge); keep the remaining safe ones.
+   if(moves.length<(avoid.length?2:4))throw Object.assign(Error(avoid.length?'현재 운동환경과 제약사항으로 구성할 수 있는 운동이 부족합니다. 건강센터 상담이 필요합니다.':'현재 장소·장비로 균형 잡힌 루틴을 만들 수 없습니다. 운동 조건을 확인하세요.'),{status:409});
    // All movement patterns get a first set before any exercise gets extra volume.
    const maxSets=cautious?1:profile.experience_level==='BEGINNER'?2:profile.experience_level==='ADVANCED'?4:3;
    if(seconds(moves)>limit){moves=moves.map(x=>({...x,reps:'4',hold_seconds:15}));}

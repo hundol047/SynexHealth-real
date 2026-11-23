@@ -31,7 +31,7 @@ it('uses a sourced selected cohort mean, rejects demo means, and keeps tiny nonz
 it('shows a large regional result with its source and missing-data instructions without relabeling total muscle',()=>{
  const view=render(<MemoryRouter><SegmentComparisonReadout selected="LEFT_ARM" focusRegion="left_arm" comparisonData={data(2.7,90)}/></MemoryRouter>);
  const card=screen.getByRole('status',{name:'선택 부위 수치 비교'});
- expect(within(card).getByText('왼팔 선택')).toBeTruthy();expect(card.textContent).toContain('결과지 기준보다 0.3 kg 적어요');expect(card.textContent).toContain('문헌 평균과 다릅니다');
+ expect(within(card).getByText('왼팔 선택')).toBeTruthy();expect(card.textContent).toContain('결과지 기준보다 0.3 kg 적어요');expect(card.textContent).toContain('3D 표준 체형과 다릅니다');
  view.rerender(<MemoryRouter><SegmentComparisonReadout selected="RIGHT_ARM" focusRegion="right_arm" comparisonData={data(2.7,90)} totalReference={{available:true,differenceKg:-3}}/></MemoryRouter>);
  expect(card.textContent).toContain('부위 비교 정보가 필요해요');expect(card.textContent).toContain('해당 부위 차이 아님');expect(card.textContent).not.toContain('0.3 kg 적어요');
  expect(within(card).getByRole('link',{name:/부위 수치 입력/}).getAttribute('href')).toBe('/health/profile#segment-measurements');

@@ -7,6 +7,20 @@ import {LOCAL_ACCOUNT} from './localMode.js';
 import {ageAt} from '../../health/lib/publishedMuscleReference.js';
 const segments=['LEFT_ARM','RIGHT_ARM','TRUNK','LEFT_LEG','RIGHT_LEG'];
 const safety=['safety_chest_pain','safety_fainting','safety_breathlessness','safety_acute_injury','safety_medical_restriction'];
+// Same rules as the server (backend/app/health/exercise_engine.py _limitations): known body parts exclude
+// exercises tagged for that part; unknown or high-risk conditions still require a consultation.
+const limitationWords={knee:['무릎','knee'],back:['허리','디스크','척추','back'],shoulder:['어깨','shoulder'],wrist:['손목','wrist'],hip:['고관절','hip'],ankle:['발목','ankle'],elbow:['팔꿈치','elbow']};
+export function localLimitations(list=[]){
+ const found=new Set();
+ for(const item of list){
+  const text=String(item).trim().toLowerCase();
+  if(!text||text==='없음'||text==='none')continue;
+  const matches=Object.keys(limitationWords).filter(k=>limitationWords[k].some(t=>text.includes(t)));
+  if(!matches.length||['수술','임신','심장','골절','surgery','pregnan','fracture'].some(w=>text.includes(w)))fail('입력한 제약사항은 자동 운동 추천 범위 밖입니다. 건강센터 상담 후 운동계획을 설정하세요.',409);
+  matches.forEach(k=>found.add(k));
+ }
+ return [...found];
+}
 const now=()=>new Date().toISOString();
 export const localDate=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
 const fail=(message,status=422)=>{throw Object.assign(Error(message),{status});};
@@ -40,15 +54,16 @@ function body(s){
 export function generateLocalRoutine(s){
  // Without a measurement we still build a conservative starter plan so a new user is never stuck.
  const p=s.exercise,m=latest(s)||null,starter=!m,recent=s.workouts.filter(w=>Date.now()-Date.parse(w.date)<7*86400000);
- if(safety.some(k=>p[k])||p.limitations.length||recent.some(w=>(w.pain??0)>=4||(w.set_records||[]).some(x=>(x.pain??0)>=4)))fail('건강센터 또는 의료전문가와 상담 후 운동계획을 설정하세요.',409);
+ if(safety.some(k=>p[k])||recent.some(w=>(w.pain??0)>=4||(w.set_records||[]).some(x=>(x.pain??0)>=4)))fail('건강센터 또는 의료전문가와 상담 후 운동계획을 설정하세요.',409);
+ const avoid=localLimitations(p.limitations);
  const height=m?.height||s.profile.height;const bmi=m&&height?m.weight/(height/100)**2:null;
  const previous=m&&[...s.measurements].filter(x=>x.measurement_date<m.measurement_date).sort((a,b)=>a.measurement_date.localeCompare(b.measurement_date)).at(-1);
  const muscleDown=previous&&m.skeletal_muscle_mass<previous.skeletal_muscle_mass;
  const gentle=starter||p.experience_level==='BEGINNER'||(bmi!=null&&bmi<18.5)||muscleDown||recent.some(w=>(w.rpe??0)>=8);
  const cautious=(bmi!=null&&bmi<18.5)||muscleDown||recent.some(w=>(w.rpe??0)>=8);
  const fatGoal=p.goal==='FAT_MANAGEMENT'||['fat_loss','weight_loss'].includes(s.goal?.strategy);
- const {exercises,day_minutes,day_timing,schedule}=balancedLocalDays(p,{gentle,cautious,fatGoal});
- return {id:secureUUID(),user_id:LOCAL_ACCOUNT,created_at:now(),based_on_measurement_id:m?.id??null,starter,goal:({GENERAL_HEALTH:'기본 체력 관리',GENERAL_FITNESS:'전반적인 체력 향상',MUSCLE_GAIN:'근력·근육량 향상',FAT_MANAGEMENT:'체지방 관리',BALANCE:'균형 있는 움직임'})[p.goal]||'나의 운동 계획',summary:'이 폰에서 생성한 기본 운동 계획입니다. 여러 근력 동작을 먼저 배정하고 남는 시간에 유산소를 더합니다. 준비운동·실제 시범·휴식을 합산한 시간이며, 근력 세션 사이에는 회복일을 두세요.',duration_weeks:4,days_per_week:p.days_per_week,exercises,day_minutes,day_timing,generated_by:'local_rules',algorithm_version:LOCAL_ROUTINE_VERSION,needs_review:false,rationale:[`운동 경험: ${{BEGINNER:'처음 시작',INTERMEDIATE:'꾸준히 운동 중',ADVANCED:'운동 경험이 많음'}[p.experience_level]} · ${{home:'집',gym:'헬스장',outdoor:'실외'}[p.exercise_location]}`,m?`측정 체중 ${m.weight}kg · 골격근량 ${m.skeletal_muscle_mass}kg`:'체성분 측정값이 없어 낮은 부담으로 시작합니다.',muscleDown?'이전보다 낮은 골격근량 기록이 있어 부담을 낮췄습니다. 측정 차이만으로 근력 저하를 진단하지 않습니다.':'근육량만으로 실제 근력·적정 중량을 추정하지 않습니다.'],notices:['개인용 기본 규칙이며 서버의 전체 추천 알고리즘과 다릅니다.','부위별 측정값과 실제 인구 평균은 만들거나 추정하지 않습니다.','통증·어지럼·흉통이 있으면 즉시 중단하세요.'],sources:[{title:'Fitbod · 목표·장비·회복을 고려한 운동 구성',url:'https://fitbod.me/'},{title:'Strong · 사용자 조절 타이머와 운동 기록',url:'https://www.strong.app/'},{title:'Nike Training Club · 단계별 프로그램',url:'https://www.nike.com/ntc-app'}],input_snapshot:{weight_kg:m?.weight??null,muscle_kg:m?.skeletal_muscle_mass??null,body_fat_percent:m?.body_fat_percentage??null,profile:structuredClone(p)},schedule,progression:gentle?'적은 세트부터 시작하고 통증과 수행 부담을 기록하세요.':'실제 수행 기록을 확인한 뒤 재생성하세요. 중량은 자동으로 올리지 않습니다.'};
+ const {exercises,day_minutes,day_timing,schedule}=balancedLocalDays(p,{gentle,cautious,fatGoal,avoid});
+ return {id:secureUUID(),user_id:LOCAL_ACCOUNT,created_at:now(),based_on_measurement_id:m?.id??null,starter,goal:({GENERAL_HEALTH:'기본 체력 관리',GENERAL_FITNESS:'전반적인 체력 향상',MUSCLE_GAIN:'근력·근육량 향상',FAT_MANAGEMENT:'체지방 관리',BALANCE:'균형 있는 움직임'})[p.goal]||'나의 운동 계획',summary:'이 폰에서 생성한 기본 운동 계획입니다. 여러 근력 동작을 먼저 배정하고 남는 시간에 유산소를 더합니다. 준비운동·실제 시범·휴식을 합산한 시간이며, 근력 세션 사이에는 회복일을 두세요.',duration_weeks:4,days_per_week:p.days_per_week,exercises,day_minutes,day_timing,generated_by:'local_rules',algorithm_version:LOCAL_ROUTINE_VERSION,needs_review:false,rationale:[`운동 경험: ${{BEGINNER:'처음 시작',INTERMEDIATE:'꾸준히 운동 중',ADVANCED:'운동 경험이 많음'}[p.experience_level]} · ${{home:'집',gym:'헬스장',outdoor:'실외'}[p.exercise_location]}`,m?`측정 체중 ${m.weight}kg · 골격근량 ${m.skeletal_muscle_mass}kg`:'체성분 측정값이 없어 낮은 부담으로 시작합니다.',muscleDown?'이전보다 낮은 골격근량 기록이 있어 부담을 낮췄습니다. 측정 차이만으로 근력 저하를 진단하지 않습니다.':'근육량만으로 실제 근력·적정 중량을 추정하지 않습니다.'],notices:['개인용 기본 규칙이며 서버의 전체 추천 알고리즘과 다릅니다.','부위별 측정값과 실제 인구 평균은 만들거나 추정하지 않습니다.','통증·어지럼·흉통이 있으면 즉시 중단하세요.',...(avoid.length?['제약 부위에 부담을 줄 수 있는 동작을 제외했습니다. 제외되지 않은 동작도 통증이 있으면 중단하세요.']:[])],sources:[{title:'Fitbod · 목표·장비·회복을 고려한 운동 구성',url:'https://fitbod.me/'},{title:'Strong · 사용자 조절 타이머와 운동 기록',url:'https://www.strong.app/'},{title:'Nike Training Club · 단계별 프로그램',url:'https://www.nike.com/ntc-app'}],input_snapshot:{weight_kg:m?.weight??null,muscle_kg:m?.skeletal_muscle_mass??null,body_fat_percent:m?.body_fat_percentage??null,profile:structuredClone(p)},schedule,progression:gentle?'적은 세트부터 시작하고 통증과 수행 부담을 기록하세요.':'실제 수행 기록을 확인한 뒤 재생성하세요. 중량은 자동으로 올리지 않습니다.'};
 }
 let chain=Promise.resolve();
 function restoredDocument(backup){

@@ -17,11 +17,11 @@ export default function SegmentComparisonReadout({selected,focusRegion,compariso
   {trunkPart&&<p className="segment-comparison-scope">{label}만의 수치가 아닌 몸통 전체 비교입니다.</p>}
   {result.available?<>
    <div className="segment-comparison-values"><span>내 측정 <b>{result.own===null?'미입력':`${comparisonNumber(result.own)} kg`}</b></span><span>{result.label} <b>{result.reference===null?'100%':`${result.kind==='report'?'약 ':''}${comparisonNumber(result.reference)} kg`}</b></span></div>
-   <p className="segment-comparison-source">{result.direction==='equal'?'차이 0%':`${percentText} ${result.direction==='below'?'적음':'많음'}`} · {result.kind==='report'?'결과지 기준(100%)이며 문헌 평균과 다릅니다.':`출처: ${result.source}`}</p>
+   <p className="segment-comparison-source">{result.direction==='equal'?'차이 0%':`${percentText} ${result.direction==='below'?'적음':'많음'}`} · {result.kind==='report'?'결과지 기준(100%)이며 3D 표준 체형과 다릅니다.':`출처: ${result.source}`}</p>
   </>:<>
    {result.own!==null&&<p className="segment-comparison-source">내 근육 분석 값 {comparisonNumber(result.own)} kg · 비교 기준 미입력</p>}
    <p className="segment-comparison-source">{hips?'결과지는 보통 좌우 팔·다리와 몸통 수치를 제공합니다.':'결과지의 ‘부위별 근육 분석’에서 kg와 %를 입력하세요.'}</p>
-   {total&&<p className="segment-comparison-total">전신 참고 · 골격근량은 문헌 평균{total.differenceKg===0?'과 같아요':`보다 ${comparisonNumber(Math.abs(total.differenceKg))} kg ${total.differenceKg<0?'적어요':'많아요'}`}. (해당 부위 차이 아님)</p>}
+   {total&&<p className="segment-comparison-total">전신 참고 · 골격근량은 {total.label||'문헌 평균'}{total.differenceKg===0?'과 같아요':`보다 ${comparisonNumber(Math.abs(total.differenceKg))} kg ${total.differenceKg<0?'적어요':'많아요'}`}. (해당 부위 차이 아님)</p>}
    {!hips&&<Link className="segment-comparison-input" to="/health/profile#segment-measurements">부위 수치 입력하기 →</Link>}
   </>}
  </section>;

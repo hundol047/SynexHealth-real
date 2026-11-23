@@ -60,19 +60,19 @@ test('InBody inputs restore and render two distinct translucent mannequins offli
  await expect.poll(async()=>{try{return (await stats(page)).layers.length;}catch{return 0;}},{timeout:30000}).toBe(2);
  const initial=await stats(page);expect(initial.layers.map(l=>l.name).sort()).toEqual(['my-muscle','reference-average']);
  expect(initial.layout).toBe('overlap');await expectRegisteredBodies(page);
- await expect(page.locator('.mannequin-scene-key .own')).toHaveText('내 몸 30 kg');await expect(page.locator('.mannequin-scene-key .reference')).toHaveText('평균 33 kg');
+ await expect(page.locator('.mannequin-scene-key .own')).toHaveText('내 몸 30 kg');await expect(page.locator('.mannequin-scene-key .reference')).toHaveText('표준 체형 29.6 kg');
  expect(initial.layers.find(l=>l.name==='my-muscle')).toMatchObject({opacity:.5,color:'#007f91',headColor:'#007f91',roughness:.86});expect(initial.layers.find(l=>l.name==='reference-average')).toMatchObject({opacity:.3,color:'#ed9748',headColor:'#ed9748',roughness:.86});
  expect(initial.layers[0].shapeFingerprint).not.toBe(initial.layers[1].shapeFingerprint);
- await expect(page.getByLabel('내 골격근량과 평균의 차이')).toContainText('문헌 평균보다 3 kg 적어요');
+ await expect(page.getByLabel('내 골격근량과 평균의 차이')).toContainText('표준 체형보다 0.4 kg 많아요');
  expect(initial.layers.every(l=>l.opacity>0&&l.opacity<1&&!l.wireframe)).toBe(true);
- await expect(page.locator('.mannequin-mass-comparison')).toContainText('33');await expect(page.locator('.mannequin-stats')).toContainText('추정 골량');await expect(page.locator('.mannequin-stats')).toContainText('3.7');
+ await expect(page.locator('.mannequin-mass-comparison')).toContainText('29.6');await expect(page.locator('.mannequin-stats')).toContainText('추정 골량');await expect(page.locator('.mannequin-stats')).toContainText('3.7');
  await page.locator('.mannequin-scene').scrollIntoViewIfNeeded();await chooseView(page,'후면');
  const back=await page.locator('[data-camera]').getAttribute('data-camera');await chooseView(page,'정면');await expect.poll(()=>page.locator('[data-camera]').getAttribute('data-camera')).not.toBe(back);
  await chooseView(page,'왼쪽');await expectRegisteredBodies(page);await chooseView(page,'오른쪽');await expectRegisteredBodies(page);
  await page.getByRole('button',{name:'나란히 비교',exact:true}).click();await expectSeparatedBodies(page);await page.getByRole('button',{name:'겹쳐보기',exact:true}).click();await expectRegisteredBodies(page);
  await page.getByText('투명도 · 골격 · 표현 설정').click();await page.getByLabel('내 마네킹 투명도').fill('80');await page.getByLabel('평균 마네킹 투명도').fill('75');await chooseView(page,'후면');
  await expect.poll(async()=>(await stats(page)).layers.find(l=>l.name==='my-muscle').opacity).toBe(.2);await expect.poll(async()=>(await stats(page)).layers.find(l=>l.name==='reference-average').opacity).toBe(.25);
- await page.getByRole('checkbox',{name:'평균 윤곽선 보기',exact:true}).uncheck();await expect.poll(async()=>(await stats(page)).contour).toBeNull();expect((await stats(page)).layers.find(l=>l.name==='reference-average')).toMatchObject({opacity:.25,wireframe:false});await page.getByRole('checkbox',{name:'평균 윤곽선 보기',exact:true}).check();
+ await page.getByRole('checkbox',{name:'표준 체형 윤곽선 보기',exact:true}).uncheck();await expect.poll(async()=>(await stats(page)).contour).toBeNull();expect((await stats(page)).layers.find(l=>l.name==='reference-average')).toMatchObject({opacity:.25,wireframe:false});await page.getByRole('checkbox',{name:'표준 체형 윤곽선 보기',exact:true}).check();
  await page.getByRole('checkbox',{name:/골격 구조 보기/}).check();await chooseView(page,'정면');await expect.poll(async()=>(await stats(page)).meshCount).toBeGreaterThan(20);
  await page.getByRole('checkbox',{name:/골격 구조 보기/}).uncheck();await page.getByLabel('내 마네킹 투명도').fill('50');await page.getByLabel('평균 마네킹 투명도').fill('70');await page.getByText('투명도 · 골격 · 표현 설정').click();
  for(const viewport of [{width:393,height:852},{width:360,height:640}]){
@@ -87,7 +87,7 @@ test('InBody inputs restore and render two distinct translucent mannequins offli
  await page.setViewportSize({width:393,height:852});await page.screenshot({path:info.outputPath('mannequin-page.png'),fullPage:true});
  await page.getByRole('button',{name:'내 몸만',exact:true}).click();await expect.poll(async()=>(await stats(page)).layers.length).toBe(1);
  expect((await stats(page)).layers[0].headOcclusion).toMatchObject({sourceBody:'my-muscle',colorWrite:false,depthWrite:true,sharedPositions:true});
- await page.getByRole('button',{name:'평균 비교 모형',exact:true}).click();await expect.poll(async()=>(await stats(page)).layers.map(layer=>layer.name)).toEqual(['reference-average']);
+ await page.getByRole('button',{name:'표준 체형 모형',exact:true}).click();await expect.poll(async()=>(await stats(page)).layers.map(layer=>layer.name)).toEqual(['reference-average']);
  expect((await stats(page)).layers[0]).toMatchObject({name:'reference-average',opacity:.3,headVisible:true,headOcclusion:{sourceBody:'reference-average',colorWrite:false,depthWrite:true,sharedPositions:true}});
  await context.setOffline(true);await page.getByRole('button',{name:'겹쳐보기',exact:true}).click();await chooseView(page,'후면');
  await expect.poll(async()=>(await stats(page)).layers.length).toBe(2);
@@ -102,18 +102,17 @@ test('InBody inputs restore and render two distinct translucent mannequins offli
  const home=await stats(page);expect(home.layers.find(l=>l.name==='my-muscle')).toMatchObject({opacity:.5,color:'#007f91',headColor:'#007f91'});expect(home.layers.find(l=>l.name==='reference-average')).toMatchObject({opacity:.3,color:'#ed9748',headColor:'#ed9748'});
  expect(requests).toEqual([]);expect(errors).toEqual([]);
 });
-test('average appears only after actual eligible profile inputs and aligns with the personal body in 3D',async({page})=>{
+test('same-height, same-sex standard body appears without birth date or extra inputs and aligns with the personal body in 3D',async({page})=>{
  await page.goto('/health/body');await expect(page.getByRole('link',{name:'측정값 입력하기',exact:true})).toBeVisible();await page.getByRole('link',{name:'측정값 입력하기',exact:true}).click();
  await page.getByLabel('체중 (kg)',{exact:true}).fill('60');await page.getByLabel('골격근량 (kg)',{exact:true}).fill('24');await page.getByLabel('키 (cm)',{exact:true}).first().fill('170');await page.getByLabel('체지방률 (%)',{exact:true}).fill('25');await page.getByRole('button',{name:'측정값 저장',exact:true}).click();await expect(page.getByRole('status').filter({hasText:'측정값을 저장했습니다.'})).toBeVisible();
- await page.goto('/health/body');await expect(page.getByRole('status').filter({hasText:'성별 · 생년월일'})).toBeVisible();await expect(page.getByRole('link',{name:'평균 모형에 필요한 정보 입력',exact:true})).toHaveAttribute('href','/health/profile');
- await expect(page.getByRole('button',{name:'평균 비교 모형',exact:true})).toBeDisabled();await expect.poll(async()=>{try{return (await stats(page)).layers.length;}catch{return 0;}}).toBe(1);
- await page.goto('/health/profile');await page.getByLabel('인체 모형 성별').selectOption('female');await page.getByLabel('생년월일').fill('2015-01-01');await page.getByRole('button',{name:'저장하기',exact:true}).click();await expect(page.getByRole('alert').filter({hasText:'만 14세 이상만 사용할 수 있습니다.'})).toBeVisible();await page.getByLabel('생년월일').fill('2010-01-01');await page.getByRole('button',{name:'저장하기',exact:true}).click();
- await expect(page.getByText('저장되었습니다.',{exact:true})).toBeVisible();await page.goto('/health/body');await expect(page.getByRole('status').filter({hasText:'18–88세'})).toBeVisible();await expect(page.getByRole('button',{name:'평균 비교 모형',exact:true})).toBeDisabled();
- await page.goto('/health/profile');await page.getByLabel('생년월일').fill('1995-01-01');await page.getByRole('button',{name:'저장하기',exact:true}).click();await expect(page.getByText('저장되었습니다.',{exact:true})).toBeVisible();await page.goto('/health/body');await expectRegisteredBodies(page);await expect(page.locator('.mannequin-mass-comparison')).toContainText('21');
+ await page.goto('/health/body');await expect(page.getByRole('status').filter({hasText:'성별'})).toBeVisible();await expect(page.getByRole('link',{name:'프로필에서 성별 설정',exact:true})).toHaveAttribute('href','/health/profile');
+ await expect(page.getByRole('button',{name:'표준 체형 모형',exact:true})).toBeDisabled();await expect.poll(async()=>{try{return (await stats(page)).layers.length;}catch{return 0;}}).toBe(1);
+ await page.goto('/health/profile');await page.getByLabel('인체 모형 성별').selectOption('female');await page.getByRole('button',{name:'저장하기',exact:true}).click();await expect(page.getByText('저장되었습니다.',{exact:true})).toBeVisible();
+ await page.goto('/health/body');await expectRegisteredBodies(page);await expect(page.locator('.mannequin-mass-comparison')).toContainText('표준 60.7 kg');await expect(page.locator('.mannequin-mass-comparison')).toContainText('표준 23%');await expect(page.locator('.mannequin-mass-comparison')).toContainText('표준 24.9 kg');
 });
-test('equal muscle mass aligns exactly and greater own mass keeps both contrasting boundaries visible',async({page},info)=>{
+test('a body equal to the standard aligns exactly and greater own mass keeps both contrasting boundaries visible',async({page},info)=>{
  await page.goto('/health/profile');await page.getByLabel('인체 모형 성별').selectOption('male');await page.getByLabel('생년월일').fill('1996-01-01');await page.getByRole('button',{name:'저장하기',exact:true}).click();await expect(page.getByText('저장되었습니다.',{exact:true})).toBeVisible();
- for(const [label,value] of [['체중 (kg)','78'],['키 (cm)','178'],['골격근량 (kg)','33'],['체지방률 (%)','23']])await page.getByLabel(label,{exact:true}).first().fill(value);
+ for(const [label,value] of [['체중 (kg)','69.7'],['키 (cm)','178'],['골격근량 (kg)','30'],['체지방률 (%)','15']])await page.getByLabel(label,{exact:true}).first().fill(value);
  await page.getByRole('button',{name:'측정값 저장',exact:true}).click();await expect(page.getByRole('status').filter({hasText:'측정값을 저장했습니다.'})).toBeVisible();await page.goto('/health/body');
  for(const name of ['정면','후면','왼쪽','오른쪽']){
   await chooseView(page,name);await expectRegisteredBodies(page);
@@ -123,7 +122,7 @@ test('equal muscle mass aligns exactly and greater own mass keeps both contrasti
  for(const [label,value] of [['체중 (kg)','78'],['키 (cm)','178'],['골격근량 (kg)','39'],['체지방률 (%)','23']])await page.getByLabel(label,{exact:true}).first().fill(value);
  await page.getByRole('button',{name:'측정값 저장',exact:true}).click();await expect(page.getByRole('status').filter({hasText:'측정값을 저장했습니다.'})).toBeVisible();
  await page.goto('/health/body');await expectRegisteredBodies(page);
- await expect(page.getByLabel('내 골격근량과 평균의 차이')).toContainText('문헌 평균보다 6 kg 많아요');
+ await expect(page.getByLabel('내 골격근량과 평균의 차이')).toContainText('표준 체형보다 0.5 kg 많아요');
  const {layers}=await stats(page);expect(layers[0].shapeFingerprint).not.toBe(layers[1].shapeFingerprint);
  await page.locator('.mannequin-scene').scrollIntoViewIfNeeded();
  await page.locator('.mannequin-scene').screenshot({path:info.outputPath('mannequin-above-average.png')});
@@ -165,7 +164,7 @@ test('body-area buttons frame both actual surfaces, turn the back, and restore t
  await picker.getByRole('button',{name:'왼팔',exact:true}).click();await fit('left_arm');await page.getByRole('button',{name:'나란히 비교',exact:true}).click();await fit('left_arm');
  await page.getByRole('button',{name:'겹쳐보기',exact:true}).click();await fit('left_arm');
  await page.getByRole('button',{name:'내 몸만',exact:true}).click();await fit('left_arm');await expect.poll(async()=>(await stats(page)).layers.length).toBe(1);
- await page.getByRole('button',{name:'평균 비교 모형',exact:true}).click();await fit('left_arm');await expect.poll(async()=>(await stats(page)).layers[0].name).toBe('reference-average');
+ await page.getByRole('button',{name:'표준 체형 모형',exact:true}).click();await fit('left_arm');await expect.poll(async()=>(await stats(page)).layers[0].name).toBe('reference-average');
  await page.getByRole('button',{name:'겹쳐보기',exact:true}).click();await page.getByRole('button',{name:'초기화',exact:true}).click();await expectRegisteredBodies(page);await expect(picker.getByRole('button',{name:'전체 보기',exact:true})).toHaveAttribute('aria-pressed','true');
  expect(errors).toEqual([]);
 });
@@ -186,7 +185,7 @@ test('selected areas show their own report differences, preserve them offline, a
  await page.getByRole('button',{name:'측정값 저장',exact:true}).click();await expect(page.getByRole('status').filter({hasText:'측정값을 저장했습니다.'})).toBeVisible();await page.goto('/health/body');await expectRegisteredBodies(page);
  const picker=page.getByRole('group',{name:'부위 확대 선택'}),card=page.getByRole('status',{name:'선택 부위 수치 비교'});
  for(const [name,message] of [['왼팔','결과지 기준보다 0.3 kg 적어요'],['오른팔','결과지 기준보다 0.3 kg 많아요'],['왼다리','결과지 기준과 같아요']]){
-  await picker.getByRole('button',{name,exact:true}).click();await expect(card).toContainText(`${name} 선택`);await expect(card.locator('.segment-comparison-difference')).toHaveText(message);await expect(card).toContainText('문헌 평균과 다릅니다');
+  await picker.getByRole('button',{name,exact:true}).click();await expect(card).toContainText(`${name} 선택`);await expect(card.locator('.segment-comparison-difference')).toHaveText(message);await expect(card).toContainText('3D 표준 체형과 다릅니다');
   await expect.poll(()=>page.evaluate(()=>document.querySelector('.segment-comparison-readout').getBoundingClientRect().bottom<document.querySelector('.mannequin-scene canvas').getBoundingClientRect().top)).toBe(true);
  }
  await page.setViewportSize({width:360,height:640});await picker.getByRole('button',{name:'왼팔',exact:true}).click();
