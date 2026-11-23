@@ -1,0 +1,53 @@
+name: Gym member & coach APKs
+on:
+  push:
+    branches: [ci/gym-release]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      SYNEX_VERSION_CODE: ${{ github.run_number }}
+      SYNEX_VERSION_NAME: 2.8.${{ github.run_number }}
+      SYNEX_GYM_OUTPUT: ${{ github.workspace }}/gym-out
+      VITE_BUILD_COMMIT: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run pose:setup
+        working-directory: frontend
+      - name: Build member and coach debug APKs
+        run: node scripts/build-gym-apps.mjs
+        working-directory: frontend
+      - name: Collect APKs under stable names
+        run: |
+          mkdir -p release
+          cp gym-out/Synex_Member_*.apk release/Synex-Member.apk
+          cp gym-out/Synex_Coach_*.apk  release/Synex-Coach.apk
+          ls -la release
+      - name: Publish GitHub release with both APKs
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: gym-v${{ github.run_number }}
+          name: Synex 회원·코치 2.8.${{ github.run_number }}
+          body: |
+            회원용(Synex Member)과 코치용(Synex Coach) 개인 모드 APK입니다.
+            임시(디버그) 서명이라 기존 설치본이 있으면 지우고 설치하세요.
+          files: |
+            release/Synex-Member.apk
+            release/Synex-Coach.apk
