@@ -77,7 +77,8 @@ jobs:
           sudo apt-get install -y postgresql-common
           sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
           sudo apt-get install -y postgresql-client-16
-      - run: python scripts/verify_postgres_restore.py
+      # Use the 16 tools explicitly: a newer pg_restore on the runner sends settings a 16 server rejects.
+      - run: PATH=/usr/lib/postgresql/16/bin:$PATH python scripts/verify_postgres_restore.py
         working-directory: backend
         env:
           SYNEX_DISPOSABLE_DB: 'true'
