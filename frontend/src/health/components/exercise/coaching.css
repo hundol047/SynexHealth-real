@@ -44,6 +44,7 @@
 .pose-coach-page .pose-coach-selector select{appearance:none;width:100%;max-width:120px;min-height:20px;border:0;padding:1px 0 0;background:transparent;font-size:12px;font-weight:700;letter-spacing:-.03em;color:var(--coach-ink);border-radius:3px;cursor:pointer}
 .pose-coach-page .pose-coach-selector svg{position:absolute;right:9px;top:23px;color:var(--coach-blue);pointer-events:none}
 .pose-coach-page .camera-coaching-immersive{margin:0;min-height:0;padding:0;gap:10px;grid-template-rows:minmax(0,1fr) auto}
+.pose-coach-page .camera-coaching-immersive .coach-stage{min-height:min(640px,max(440px,70svh))}
 .pose-coach-page .coach-stage{height:auto;min-height:0;gap:10px;grid-template-rows:minmax(0,1fr) minmax(0,1fr)}
 .pose-coach-page .coach-pane{min-height:0;border:1px solid var(--coach-line);border-radius:14px;background:#fff;box-shadow:none}
 .pose-coach-page .coach-pane-title{padding:9px 13px;min-height:36px;flex-wrap:nowrap;border-bottom:1px solid #e2e8f0;background:#fff}
@@ -167,3 +168,20 @@
  .pose-coach-page .coach-camera-empty{padding-top:23px}
 }
 @media(prefers-reduced-motion:reduce){.pose-coach-page .coach-preferences input,.pose-coach-page .coach-preferences input::after{transition:none}}
+/* Framing guide over the live preview (never recorded). */
+.coach-frame-guide{pointer-events:none;z-index:1;overflow:visible}
+.coach-frame-body{fill:rgba(255,255,255,.10);stroke:#fff;stroke-width:.8;stroke-dasharray:2.4 1.6;stroke-linejoin:round;vector-effect:non-scaling-stroke;filter:drop-shadow(0 0 1.5px rgba(15,23,42,.55))}
+.coach-frame-box{fill:none;stroke:rgba(255,255,255,.55);stroke-width:1;stroke-dasharray:3 3;vector-effect:non-scaling-stroke}
+.coach-frame-corner{fill:none;stroke:#fff;stroke-width:3;stroke-linecap:round;vector-effect:non-scaling-stroke;filter:drop-shadow(0 0 1px rgba(15,23,42,.6))}
+.coach-frame-cut{stroke:#ef4444;stroke-width:5;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.coach-frame-guide.is-ok .coach-frame-body,.coach-frame-guide.is-ok .coach-frame-corner{stroke:#22c55e}
+.coach-frame-guide.is-ok .coach-frame-body{fill:rgba(34,197,94,.10)}
+.coach-frame-guide.is-cut .coach-frame-body,.coach-frame-guide.is-cut .coach-frame-corner,.coach-frame-guide.is-far .coach-frame-body,.coach-frame-guide.is-far .coach-frame-corner{stroke:#f59e0b}
+.coach-frame-guide.is-ok{opacity:.55;transition:opacity .4s}
+.coach-frame-hint{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);z-index:2;max-width:calc(100% - 20px);padding:6px 12px;border-radius:999px;background:rgba(15,23,42,.78);color:#fff;font-size:13px;font-weight:600;text-align:center;line-height:1.35}
+.coach-frame-hint.is-ok{background:rgba(21,128,61,.85)}
+.coach-frame-hint.is-cut,.coach-frame-hint.is-far{background:rgba(180,83,9,.9)}
+/* Before the camera is on, the demonstration gets most of the stage, and the
+   athlete starts below the floating view/playback controls instead of under them. */
+.pose-coach-page .coach-stage-split:has(.coach-live-status:not(.is-active)){grid-template-rows:minmax(0,3fr) minmax(0,2fr)}
+.pose-coach-page .coach-demo:not(.bodyweight-demo-floor) .bodyweight-demo-stage{padding-top:52px}

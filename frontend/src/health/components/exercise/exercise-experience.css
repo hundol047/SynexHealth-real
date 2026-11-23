@@ -231,3 +231,7 @@
 
 .exercise-library-stage .motion-studio-heading { display:none; }
 .motion-loading{padding:12px 14px;border-radius:12px;background:#eef5ff;color:#31577c;font-size:13px;line-height:1.6;margin:8px 0}
+/* Shown when this phone cannot draw 3D: a short note over the 2D guide, not a wall of text. */
+.motion-scene-fallback{position:absolute;inset:0;display:flex;flex-direction:column;min-height:0}
+.motion-scene-fallback>p{margin:6px 10px 0;font-size:12px;line-height:1.4;color:var(--muted,#64748b)}
+.motion-scene-fallback>:not(p){flex:1;min-height:0}

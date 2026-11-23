@@ -78,7 +78,7 @@ function Athlete({ motion, progress, mirror, measurement, profile, compact, ligh
     return { ...prepared, geometry, appearance: surface };
   }, [measurement, profile, appearance, motion, JSON.stringify(character),highlight,faceAtlas]);
   const joints = useMemo(() => {
-    const posed = poseJoints(motion, progress, poseRest);
+    const posed = poseJoints(motion, progress, model.rest);
     if (posed.handRoll && !posed.boneRotations?.[12]) posed.handRoll = model.palmRoll;
     return posed;
   }, [motion, progress, model]);
