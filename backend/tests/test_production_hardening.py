@@ -140,22 +140,35 @@ def test_api_documentation_is_not_published_in_production():
     assert out.stdout.strip() == '[]', out.stderr[-400:]
 
 
-def test_review_login_locks_after_repeated_wrong_passwords(monkeypatch):
+def test_review_login_locks_per_address_without_locking_out_others(monkeypatch):
     import hashlib
+    from types import SimpleNamespace
     from fastapi import HTTPException
     from app.services import review_access
     monkeypatch.setenv('APP_REVIEW_MODE', 'true'); monkeypatch.setenv('APP_REVIEW_USERNAME', 'reviewer'); monkeypatch.setenv('APP_REVIEW_SALT', 'salt')
     monkeypatch.setenv('APP_REVIEW_PASSWORD_HASH', hashlib.pbkdf2_hmac('sha256', b'correct horse', b'salt', 600000).hex())
     review_access.FAILURES.clear()
-    for _ in range(review_access.MAX_FAILURES):
+    def attempt(address, password):
         try:
-            review_access.review(review_access.Login(username='reviewer', password='wrong'))
+            review_access.review(review_access.Login(username='reviewer', password=password), SimpleNamespace(client=SimpleNamespace(host=address)))
+            return 200
         except HTTPException as error:
-            assert error.status_code == 401
-    # Even the right password is refused while locked, from any address.
-    try:
-        review_access.review(review_access.Login(username='reviewer', password='correct horse'))
-        raise AssertionError('expected lock')
-    except HTTPException as error:
-        assert error.status_code == 429
+            return error.status_code
+    assert [attempt('203.0.113.7', 'wrong') for _ in range(review_access.MAX_FAILURES)] == [401] * review_access.MAX_FAILURES
+    # The guessing address is locked, even with the right password...
+    assert attempt('203.0.113.7', 'correct horse') == 429
+    # ...but it cannot lock the real reviewer out from another address.
+    assert attempt('198.51.100.20', 'correct horse') == 200
+    # A guesser rotating addresses is still bounded by the overall ceiling.
+    monkeypatch.setattr(review_access, 'MAX_TOTAL_FAILURES', review_access.MAX_FAILURES + 3)
+    assert [attempt(f'192.0.2.{n}', 'wrong') for n in range(3)] == [401] * 3
+    assert attempt('198.51.100.20', 'correct horse') == 429
     review_access.FAILURES.clear()
+
+
+def test_api_docs_are_exempt_from_the_app_csp():
+    from fastapi.testclient import TestClient
+    from app.main import app
+    client = TestClient(app)
+    assert 'content-security-policy' not in client.get('/docs').headers
+    assert 'content-security-policy' in client.get('/healthz').headers

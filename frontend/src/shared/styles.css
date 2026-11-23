@@ -314,3 +314,4 @@ img.health-brand-icon{border:1px solid var(--line);background:#fff}
 .workout-done-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 8px 8px 14px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--blue-pale);font-weight:700;color:var(--success);font-size:.9rem}
 .workout-done-row .btn{min-height:40px;flex:none}
 #school-connection{scroll-margin-top:76px}
+.workout-item{scroll-margin-top:76px}

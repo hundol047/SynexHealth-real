@@ -59,7 +59,8 @@ async def validation_handler(request, exc):
 
 @app.exception_handler(Exception)
 async def unexpected_handler(request, exc):
-    # Log the failure class and route only -- never the message, which can carry user data.
+    # This line carries the failure class and route only. The server's own error log still
+    # records the traceback, so keep health values out of exception messages at the source.
     log.error('unhandled %s on %s %s', type(exc).__name__, request.method, request.url.path)
     return JSONResponse(status_code=500, content={'detail': '일시적인 오류가 발생했습니다. 잠시 후 다시 시도하세요.'})
 

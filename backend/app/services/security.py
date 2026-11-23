@@ -14,6 +14,9 @@ APP_CSP=("default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 's
  "connect-src 'self' https: data: blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
 # Only the camera (pose coaching) and microphone (optional recording) are ever requested.
 PERMISSIONS_POLICY='camera=(self), microphone=(self), geolocation=(), payment=(), usb=(), bluetooth=(), browsing-topics=()'
+# FastAPI's interactive docs load their script from a CDN and start it inline. They are only
+# served outside production (see main.py), so they are exempt rather than loosening APP_CSP.
+DOCS_PATHS=frozenset(('/docs','/redoc','/docs/oauth2-redirect'))
 class SecurityMiddleware:
  def __init__(self,app):self.app=app;self.buckets=OrderedDict()
  async def __call__(self,scope,receive,send):
@@ -50,7 +53,7 @@ class SecurityMiddleware:
   async def secure_send(message):
    if message['type']=='http.response.start':
     message['headers']=list(message.get('headers',[]))+[(b'x-content-type-options',b'nosniff'),(b'referrer-policy',b'no-referrer'),(b'x-frame-options',b'DENY'),(b'cache-control',b'no-store'),
-     (b'content-security-policy',(API_CSP if path.startswith('/api/') else APP_CSP).encode()),(b'permissions-policy',PERMISSIONS_POLICY.encode()),
+     *([] if path in DOCS_PATHS else [(b'content-security-policy',(API_CSP if path.startswith('/api/') else APP_CSP).encode())]),(b'permissions-policy',PERMISSIONS_POLICY.encode()),
      (b'cross-origin-opener-policy',b'same-origin'),(b'x-permitted-cross-domain-policies',b'none')]
     if scope.get('scheme')=='https':message['headers'].append((b'strict-transport-security',b'max-age=31536000; includeSubDomains'))
    await send(message)

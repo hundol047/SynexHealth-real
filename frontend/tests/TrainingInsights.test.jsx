@@ -37,7 +37,9 @@ describe('personalRecords', () => {
     const push = records.find((r) => r.key === 'push_up');
     expect(push.reps).toEqual({ reps: 15, date: '2026-11-15' });
     expect(push.heaviest).toBeNull();
-    expect(push.recent).toBe(true);
+    // 11-15 is the Sunday before this week (Monday 11-16): a best, but not one set this week.
+    expect(push.recent).toBe(false);
+    expect(personalRecords([log('2026-11-17', 'push_up', '푸시업', [set(9)])], NOW)[0].recent).toBe(true);
   });
 });
 
@@ -67,6 +69,10 @@ describe('region volume and measurement link', () => {
     expect(upper).toMatchObject({ percent: 84, segment: 'LEFT_ARM', focus: true, advice: '훈련 비중 확인', share: 5 });
     expect(link.regions.find((r) => r.region === '하체').advice).toBe('유지');
     expect(measurementTrainingLink({ segments: [] }, volume).status).toBe('no_segments');
+    // An omitted reference % stays missing instead of becoming 0 % and winning "lowest".
+    const partial = measurementTrainingLink({ segments: [{ segment: 'LEFT_ARM', lean_reference_percent: null }, { segment: 'RIGHT_ARM', lean_reference_percent: 95 }, { segment: 'TRUNK', lean_reference_percent: '' }] }, volume);
+    expect(partial.regions.map((r) => [r.region, r.percent, r.focus])).toEqual([['상체', 95, false]]);
+    expect(measurementTrainingLink({ segments: [{ segment: 'LEFT_ARM', lean_reference_percent: null }] }, volume).status).toBe('no_reference');
   });
 });
 

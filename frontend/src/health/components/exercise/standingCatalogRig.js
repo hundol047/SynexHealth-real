@@ -23,10 +23,14 @@ const ease = (a, b, value) => {
 const rep = repetition;
 const normalized = p => vec(p).normalize();
 
-function solveLimb(origin, target, upper, lower, toward) {
+// `soft` eases a free limb toward full extension (see poseMath.solveTwoBone). Supporting hands and
+// planted feet keep the exact clamp so their contact points do not move.
+function solveLimb(origin, target, upper, lower, toward, soft = false) {
   const direction = vec(target).sub(vec(origin));
-  const requested = direction.length();
+  let requested = direction.length();
   if (requested < 1e-8) direction.set(0, -1, 0); else direction.divideScalar(requested);
+  const reach = upper + lower, margin = .02 * reach;
+  if (soft && requested > reach - margin) requested = reach - margin + margin * (1 - Math.exp(-(requested - (reach - margin)) / margin));
   const distance = THREE.MathUtils.clamp(requested, Math.abs(upper - lower) + 1e-6, upper + lower - 1e-6);
   const along = (upper * upper + distance * distance - lower * lower) / (2 * distance);
   const height = Math.sqrt(Math.max(0, upper * upper - along * along));
@@ -310,7 +314,7 @@ export function standingCatalogPose(id, progress, rest) {
       target = [joints[root][0] + side * .02 * h, joints[root][1] - (brisk ? .30 : .39) * h, joints[root][2] + (brisk ? .18 : .13) * h * swing + (brisk ? .12 : .03) * h];
       toward = [0, -.2, 1];
     }
-    [joints[elbow], joints[wrist]] = solveLimb(joints[root], target, upper, lower, toward);
+    [joints[elbow], joints[wrist]] = solveLimb(joints[root], target, upper, lower, toward, id === 'hamstring_stretch');
     const direction = hand ? normalized(hand) : vec(joints[wrist]).sub(vec(joints[elbow])).normalize();
     joints[finger] = vec(joints[wrist]).addScaledVector(direction, length(wrist, finger)).toArray();
     if (id === 'wall_push' || id === 'close_wall_push' || id === 'calf_stretch') {

@@ -32,7 +32,7 @@ export default function ProgressPage() {
   const period = PERIODS.find((p) => p.id === periodId) || PERIODS[4];
 
   const all = progress.data?.measurements || [];
-  const latestMeasurement=all.reduce((a,m)=>!a||m.measurement_date>a.measurement_date?m:a,null);
+  const latestMeasurement=all.reduce((a,m)=>!a||m.measurement_date>=a.measurement_date?m:a,null);
   const average=progress.data?.average_comparison;
   const reference=average?.groups.find(g=>g.id===average.selected_group_id);
   const [referenceMetric,setReferenceMetric]=useState('skeletal_muscle_mass');

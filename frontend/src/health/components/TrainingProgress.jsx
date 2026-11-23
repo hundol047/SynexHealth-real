@@ -24,7 +24,7 @@ export default function TrainingProgress({measurement}={}){
   <StatTile label="이번 주 운동한 날" value={thisWeek.days} unit="일" delta={thisWeek.days-lastWeek.days} deltaLabel="지난주 대비"/>
   <StatTile label="이번 주 본 세트" value={thisWeek.sets} unit="세트" delta={thisWeek.sets-lastWeek.sets} deltaLabel="지난주 대비"/>
   <StatTile label="이번 주 중량×횟수" value={thisWeek.loadedSets?Math.round(thisWeek.volume):null} unit=" kg·회"/>
-  <StatTile label="최근 갱신한 기록" value={records.filter(r=>r.recent).length} unit="개"/>
+  <StatTile label="이번 주 갱신한 기록" value={records.filter(r=>r.recent).length} unit="개"/>
  </div>:<p>운동을 기록하면 이번 주 운동한 날과 세트 수가 여기에 바로 보여요.</p>}
  <details className="simple-details"><summary>주별 기록 자세히 보기</summary>
  <p className="muted">최근 8주 · 월요일 시작 · 이번 주는 진행 중입니다. 세트 기록이 있으면 준비 세트를 제외합니다.</p>
@@ -41,7 +41,7 @@ export default function TrainingProgress({measurement}={}){
 
 function PersonalRecords({records}){
  return <Card title="개인 최고 기록">{records.length?<><ul className="record-list" aria-label="운동별 최고 입력 기록 · 통증 기록 제외">{records.map(r=><li key={r.key}>
-  <div className="record-name">{r.name}{r.recent&&<span className="badge badge-blue">최근 갱신</span>}</div>
+  <div className="record-name">{r.name}{r.recent&&<span className="badge badge-blue">이번 주 갱신</span>}</div>
   <div className="record-values">
    {r.heaviest&&<span>최고 <strong>{r.heaviest.weight_kg} kg × {r.heaviest.reps}회</strong> <small>{r.heaviest.date}</small></span>}
    {r.e1rm&&<span>추정 1RM <strong>{r.e1rm.value} kg</strong></span>}

@@ -42,13 +42,18 @@ function rawStretchPose(motion,t,rest){
  if(id==='calf_straight')hip=s([0,.90,.04*amount]);
  const j=makeFrame(rest,hip,up,front,id==='thoracic_turn'?[0,0,1]:front);
  if(child){
+  // Seat the pelvis from the actual hip joints. Estimating from the pelvis centre left the thigh
+  // a few millimetres short early on, so the fixed knees slid back 3 cm and reversed in one frame.
+  const travel=.29*h*amount,dx=j[9][0]-.14*h,thigh=segmentLength(rest,9,10);
+  const lift=.085*h+Math.sqrt(Math.max(0,thigh*thigh-dx*dx-travel*travel))-j[9][1];
+  for(const index of [0,1,2,3,6,9,12])j[index][1]+=lift;
   const neck=[0,-.12*amount,1];
   j[2]=vector(j[1]).addScaledVector(vector(neck).normalize(),segmentLength(rest,1,2)).toArray();
   j.boneRotations[1]=orientation(neck,[0,-1,-.12*amount]).toArray();
  }
  if(id==='triceps'){j[3][1]+=.10*h*amount;j[6][1]+=.04*h*amount;}
- const arm=(side,target,pole=[side===0?1:-1,0,0])=>solveLimb(j,rest,side,'arm',s(target),pole);
- const leg=(side,target,pole=[0,0,1])=>solveLimb(j,rest,side,'leg',s(target),pole);
+ const arm=(side,target,pole=[side===0?1:-1,0,0])=>solveLimb(j,rest,side,'arm',s(target),pole,true);
+ const leg=(side,target,pole=[0,0,1])=>solveLimb(j,rest,side,'leg',s(target),pole,true);
  const endpoint=(side,target,pole)=>{const shoulder=j[side?6:3],neutral=[shoulder[0]/h+(side?-.055:.055),shoulder[1]/h-.46,shoulder[2]/h+.045];arm(side,neutral.map((v,i)=>v+(target[i]-v)*amount),pole);};
  for(const side of [0,1]){
   const sign=side===0?1:-1;
@@ -60,10 +65,11 @@ function rawStretchPose(motion,t,rest){
  if(child){for(const side of [0,1]){
   const sign=side?-1:1,[root,knee,ankle]=side?[12,13,14]:[9,10,11];
   const dy=j[root][1]-.085*h,dx=j[root][0]-sign*.14*h,thigh=segmentLength(rest,root,knee);
-  j[knee]=[sign*.14*h,.085*h,j[root][2]+Math.sqrt(Math.max(0,thigh*thigh-dy*dy-dx*dx))];
+  j[knee]=[sign*.14*h,.085*h,j[root][2]+.29*h*amount];
   const shin=segmentLength(rest,knee,ankle),rise=.015*h;
   j[ankle]=[j[knee][0],.10*h,j[knee][2]-Math.sqrt(shin*shin-rise*rise)];
-  arm(side,[sign*.20+(id==='child_side'?.12*amount:0),.047,.36],[sign*.15,1,0]);
+  // Palms rest on the mat a little ahead of the shoulders, easing into full reach.
+  solveLimb(j,rest,side,'arm',s([sign*.20+(id==='child_side'?.12*amount:0),.047,.375]),[sign*.15,1,0],true);
  }}
  switch(id){
   case 'neck_side':case 'neck_diagonal':{
@@ -179,7 +185,9 @@ export function stretchPoseJoints(motion,t,rest){
   let rotation;
   if(route){
    const via=(route==='side'?new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),(armSide?-1:1)*1.66):new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),-1.4)).multiply(from);
-   rotation=amount<.5?from.clone().slerp(via,amount*2):via.slerp(to,amount*2-1);
+   // Blend the two legs of the route into one curve. Going to the via pose and then on to
+   // the hold changed direction in a single frame, which showed as a jerk mid-raise.
+   rotation=from.clone().slerp(via,amount).slerp(via.clone().slerp(to,amount),amount);
   }else rotation=from.slerp(to,amount);
   posed.boneRotations[bone]=rotation.toArray();posed[b]=vector(rest[b]).sub(vector(rest[a])).applyQuaternion(rotation).add(vector(posed[a])).toArray();
  }

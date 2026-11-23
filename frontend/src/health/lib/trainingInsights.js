@@ -46,8 +46,9 @@ export function personalRecords(logs,now=new Date()){
   }
   if(used){entry.sessions++;byKey.set(key,entry);}
  }
- const latest=ordered.at(-1)?.date;
- return [...byKey.values()].map(e=>({...e,recent:[e.heaviest?.date,e.e1rm?.date,e.reps?.date].some(d=>d&&latest&&d===latest)}))
+ // "Recent" means set this week (Monday start), matching the this-week tiles it is shown with.
+ const monday=new Date(now.getFullYear(),now.getMonth(),now.getDate());monday.setDate(monday.getDate()-(monday.getDay()+6)%7);const weekStart=dateKey(monday);
+ return [...byKey.values()].map(e=>({...e,recent:[e.heaviest?.date,e.e1rm?.date,e.reps?.date].some(d=>d&&d>=weekStart)}))
   .sort((a,b)=>a.name.localeCompare(b.name,'ko'));
 }
 
@@ -75,7 +76,8 @@ export function measurementTrainingLink(measurement,volume,threshold=90){
  if(!measurement?.segments?.length)return {status:'no_segments',regions:[]};
  const lowest={};
  for(const s of measurement.segments){
-  const region=SEGMENT_REGION[s.segment],p=Number(s.lean_reference_percent);
+  // A missing value must stay missing: Number(null) and Number('') are 0, which read as 0 % of reference.
+  const raw=s.lean_reference_percent,region=SEGMENT_REGION[s.segment],p=raw==null||raw===''?NaN:Number(raw);
   if(!region||!Number.isFinite(p))continue;
   if(!lowest[region]||p<lowest[region].percent)lowest[region]={percent:p,segment:s.segment};
  }

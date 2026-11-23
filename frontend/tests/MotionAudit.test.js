@@ -22,6 +22,22 @@ describe('all 104 demonstrations stay physically plausible',()=>{
   }
  });
 
+ it('moves stretches without single-frame changes of speed',()=>{
+  // Largest change in a joint's velocity between consecutive frames, as a share of that joint's
+  // peak speed. Before the fixes these were 0.86-1.59: a visible snap of a knee, ankle or arm.
+  const N=480,joints=[2,4,5,7,8,10,11,13,14,0];
+  for(const id of ['recovery_shoulder_cross','recovery_triceps','recovery_side_reach','recovery_calf_straight','recovery_adductor_side','recovery_child','recovery_child_side']){
+   const poses=[];for(let f=0;f<N;f++)poses.push(poseJoints(id,f/N,REST));
+   let worst=0;
+   for(const joint of joints){
+    const velocity=poses.map((pose,f)=>[0,1,2].map(k=>(poses[(f+1)%N][joint][k]-pose[joint][k])*N));
+    const peak=Math.max(...velocity.map(v=>Math.hypot(...v)));if(peak<.05)continue;
+    velocity.forEach((v,f)=>{const next=velocity[(f+1)%N];worst=Math.max(worst,Math.hypot(v[0]-next[0],v[1]-next[1],v[2]-next[2])/peak);});
+   }
+   expect(worst,id).toBeLessThan(.45);
+  }
+ });
+
  it('keeps skin, shoes, walls and joint ranges valid on the real clothed surface',()=>{
   const avatar=buildAvatar(undefined);
   for(const id of MOTIONS){

@@ -35,6 +35,8 @@ export default function WorkoutPage() {
   const [creating,setCreating]=useState(false),[createFailed,setCreateFailed]=useState(false);
   // The exercise just saved stays open so its confirmation is visible; earlier finished ones fold.
   const [reopened,setReopened]=useState({});
+  // Exercises without an id fall back to their name, which can repeat on another day.
+  const foldKey=ex=>`${ex.day_number}:${ex.exercise_id||ex.exercise_name}`;
   // One tap from the empty workout screen; the plan screen explains anything that blocks it.
   async function createPlan(){
     setCreating(true);setCreateFailed(false);
@@ -90,21 +92,21 @@ export default function WorkoutPage() {
             ))}
           </div>
         )}
-        {dayExercises.length > 1 && <nav className="section-jump workout-jump" aria-label="오늘의 운동 바로가기">{dayExercises.map((ex,i)=><button type="button" key={(ex.exercise_id||ex.exercise_name)+i} className={`section-jump-chip ${isDone(ex)?'is-done':''}`} onClick={()=>{setReopened(current=>({...current,[ex.exercise_id||ex.exercise_name]:true}));requestAnimationFrame(()=>document.getElementById(ex.exercise_id)?.scrollIntoView?.({behavior:'smooth',block:'start'}));}}>{isDone(ex)?'✓ ':`${i+1}. `}{ex.exercise_name}</button>)}</nav>}
+        {dayExercises.length > 1 && <nav className="section-jump workout-jump" aria-label="오늘의 운동 바로가기">{dayExercises.map((ex,i)=><button type="button" key={(ex.exercise_id||ex.exercise_name)+i} className={`section-jump-chip ${isDone(ex)?'is-done':''}`} onClick={()=>{setReopened(current=>({...current,[foldKey(ex)]:true}));requestAnimationFrame(()=>document.getElementById(`workout-item-${i}`)?.scrollIntoView?.({behavior:'smooth',block:'start'}));}}>{isDone(ex)?'✓ ':`${i+1}. `}{ex.exercise_name}</button>)}</nav>}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {dayExercises.length === 0 && <p className="muted">이 날에는 계획된 운동이 없습니다.</p>}
           {dayExercises.map((ex,i) => {
             const key=ex.exercise_id||ex.exercise_name;
             const previous=previousWorkout(workouts.data||[],ex,today);
-            const folded=isDone(ex)&&!reopened[key];
+            const folded=isDone(ex)&&!reopened[foldKey(ex)];
             // Finished exercises fold to one line. They stay mounted so nothing typed is lost.
             return <React.Fragment key={key+i}>
-            {folded&&<div className="workout-done-row"><span>✓ {ex.exercise_name}</span><button type="button" className="btn btn-ghost" onClick={()=>setReopened(current=>({...current,[key]:true}))} aria-label={`${ex.exercise_name} 기록 열기`}>기록 열기</button></div>}
-            <div hidden={folded} style={{display:folded?'none':'block'}}><ExerciseCard exercise={ex}>
+            {folded&&<div className="workout-done-row"><span>✓ {ex.exercise_name}</span><button type="button" className="btn btn-ghost" onClick={()=>setReopened(current=>({...current,[foldKey(ex)]:true}))} aria-label={`${ex.exercise_name} 기록 열기`}>기록 열기</button></div>}
+            <div id={`workout-item-${i}`} className="workout-item" hidden={folded} style={{display:folded?'none':'block'}}><ExerciseCard exercise={ex}>
               {previous&&<p className="muted">지난 기록 ({previous.date}): {previous.set_records?.length?previous.set_records.map(s=>`${s.weight_kg==null?'중량 미기록':`${s.weight_kg}kg`} × ${s.reps}회${s.kind==='warmup'?' (준비)':''}`).join(' / '):`${previous.sets_completed??'—'}세트 · ${previous.reps_completed??'횟수 미기록'}`}</p>}
               <WorkoutRecordForm key={`${latest.id}-${today}-${key}`} exercise={ex} routine={latest} date={today}
                 existing={todaysLogs.find(w=>w.routine_id===latest.id&&w.day_number===ex.day_number&&(ex.exercise_id?w.routine_exercise_id===ex.exercise_id:w.exercise_name===ex.exercise_name))}
-                previous={previous} onSaved={()=>{setReopened({[key]:true});return workouts.reload();}}/>
+                previous={previous} onSaved={()=>{setReopened({[foldKey(ex)]:true});return workouts.reload();}}/>
 
             </ExerciseCard></div></React.Fragment>;
           })}
