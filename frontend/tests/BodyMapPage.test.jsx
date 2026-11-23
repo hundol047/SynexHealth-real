@@ -32,8 +32,8 @@ describe('BodyMapPage', () => {
     const user = userEvent.setup();
     render(<MemoryRouter><BodyMapPage /></MemoryRouter>);
 
-    const referenceBtn = await screen.findByRole('button', { name: /평균과 비교/ });
-    const previousBtn = screen.getByRole('button', { name: /이전 기록과 비교/ });
+    const referenceBtn = await screen.findByRole('button', { name: /Average Compare/ });
+    const previousBtn = screen.getByRole('button', { name: /Previous Compare/ });
     expect(screen.getByRole('button',{name:'내 체성분 마네킹'}).className).toContain('btn-primary');
     await user.click(referenceBtn);
     expect(referenceBtn.className).toContain('btn-primary');

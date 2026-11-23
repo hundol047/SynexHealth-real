@@ -57,7 +57,7 @@ export default function HomePage() {
       {LOCAL_ONLY&&<div className="home-feature-grid">
         <Link className="home-feature home-feature-coach" to="/health/pose" aria-label="맨몸운동 카메라 코치">
           <div className="home-feature-top"><span className="home-feature-icon"><Camera size={24}/></span><ArrowUpRight size={20} aria-hidden="true"/></div>
-          <span className="home-feature-kicker">촬영 42종 · 실시간 교정 7종</span>
+          <span className="home-feature-kicker">74종 촬영 · 자세 분석</span>
           <strong>맨몸운동<br/>촬영·자세 교정</strong>
           <p>위에서 운동 방법을 보고<br/>아래에서 내 동작을 촬영하세요.</p>
           <span className="home-feature-action">촬영 열기 <ArrowUpRight size={15}/></span>

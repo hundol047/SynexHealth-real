@@ -185,3 +185,7 @@
    athlete starts below the floating view/playback controls instead of under them. */
 .pose-coach-page .coach-stage-split:has(.coach-live-status:not(.is-active)){grid-template-rows:minmax(0,3fr) minmax(0,2fr)}
 .pose-coach-page .coach-demo:not(.bodyweight-demo-floor) .bodyweight-demo-stage{padding-top:52px}
+/* The heading shrinks with an ellipsis instead of pushing the page sideways. */
+.pose-coach-page .pose-coach-heading{min-width:0;flex:1 1 auto}
+.pose-coach-page .pose-coach-heading h1,.pose-coach-page .pose-coach-heading p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pose-coach-page{grid-template-columns:minmax(0,1fr)}

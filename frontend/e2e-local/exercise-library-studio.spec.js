@@ -92,15 +92,16 @@ test('changing the selected exercise resets the stage and keeps directions and p
  expect(errors).toEqual([]);
 });
 
-test('camera filter offers exactly the seven supported bodyweight variants',async({page})=>{
+test('camera filter covers all 74 entries including gym exercises',async({page})=>{
  await page.goto('/health/library');
- await page.getByLabel('맨몸 카메라 코칭 지원 운동만 보기').check();
- await expect(page.locator('.exercise-card')).toHaveCount(7);
+ await page.getByLabel('카메라 코칭 지원 운동만 보기').check();
+ while(await page.getByRole('button',{name:/운동 더 보기/}).count())await page.getByRole('button',{name:/운동 더 보기/}).click();
+ await expect(page.locator('.exercise-card')).toHaveCount(74);
  for(const id of ['squat','lunge','side_lunge','full_pushup','plank','hinge','bridge']){
   const name=catalogue.find(exercise=>exercise.motion_id===id).name;
   await expect(page.getByRole('button',{name:`${name} 동작 보기`,exact:true})).toHaveCount(1);
  }
- await expect(page.getByRole('button',{name:'무릎 푸시업 동작 보기',exact:true})).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'무릎 푸시업 동작 보기',exact:true})).toHaveCount(1);
  await expect(page.locator('canvas')).toHaveCount(0);
 });
 
@@ -123,24 +124,24 @@ test('supported library movement opens the matching camera guide with an explici
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
  await page.screenshot({path:info.outputPath('exercise-studio-bodyweight-393.png')});
  await page.getByRole('link',{name:'이 동작 촬영·자세 교정',exact:true}).click();
- await expect(page.getByRole('heading',{name:'맨몸운동 코칭'})).toBeVisible();
+ await expect(page.getByRole('heading',{name:'운동 자세 코칭'})).toBeVisible();
  await expect(page.getByLabel('따라 할 운동')).toHaveValue('hip_hinge');
  await expect(page.getByRole('button',{name:'코칭 시작',exact:true})).toBeVisible();
  expect(await page.evaluate(()=>window.__cameraRequests)).toBe(0);
  await expect(page.locator('body')).not.toHaveClass(/exercise-library-focus/);
 });
 
-test('the first bodyweight library movement offers filming without claiming unsupported correction',async({page})=>{
+test('the first bodyweight library movement offers filming and correction without loading a model on entry',async({page})=>{
  const modelRequests=[];page.on('request',r=>{if(/pose_landmarker|vision_wasm|\/api\//.test(r.url()))modelRequests.push(r.url());});
  await page.emulateMedia({reducedMotion:'reduce'});
  await page.addInitScript(()=>{window.__cameraRequests=0;Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:{getUserMedia:async()=>{window.__cameraRequests++;throw new DOMException('denied','NotAllowedError');}}});});
  await page.goto('/health/library');
  await page.getByRole('button',{name:'의자 앉았다 일어나기 동작 보기',exact:true}).click();
- const entry=page.getByRole('link',{name:'이 동작 동영상 촬영',exact:true});
+ const entry=page.getByRole('link',{name:'이 동작 촬영·자세 교정',exact:true});
  await expect(entry).toBeInViewport();await expect(entry).toHaveAttribute('href','/health/pose?motion=sit_stand');await entry.click();
  await expect(page.getByLabel('따라 할 운동')).toHaveValue('sit_stand');
  await expect(page.locator('.coach-example canvas')).toHaveAttribute('data-exercise-rendered','sit_stand');
  await expect(page.getByRole('button',{name:'동영상 촬영',exact:true})).toBeVisible();
- await expect(page.getByRole('button',{name:'실시간 교정 미지원'})).toBeDisabled();
+ await expect(page.getByRole('button',{name:'코칭 시작',exact:true})).toBeEnabled();
  expect(await page.evaluate(()=>window.__cameraRequests)).toBe(0);expect(modelRequests).toEqual([]);
 });

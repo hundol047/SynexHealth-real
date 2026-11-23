@@ -3,12 +3,12 @@ import {it,expect,vi,afterEach} from 'vitest';
 import {render,screen,fireEvent,cleanup} from '@testing-library/react';
 import {MemoryRouter,Routes,Route} from 'react-router-dom';
 import PoseCoachPage from '../src/health/pages/PoseCoachPage.jsx';
-import {BODYWEIGHT_RECORDING_EXERCISES} from '../src/health/components/exercise/bodyweightGuide.js';
+import {COACHING_CATALOG} from '../src/health/components/exercise/coachingCatalog.js';
 vi.mock('../src/health/components/exercise/CameraCoaching.jsx',()=>({default:({motion,immersive})=><div data-testid="coach" data-motion={motion} data-immersive={immersive}/> }));
 afterEach(cleanup);
-it('opens all 42 bodyweight recording exercises while rejecting equipment URLs',()=>{
+it('opens all 74 bodyweight and equipment coaching exercises including deep links',()=>{
  render(<MemoryRouter initialEntries={['/health/pose?motion=shoulder_press']}><PoseCoachPage/></MemoryRouter>);
- expect(screen.getByLabelText('따라 할 운동').value).toBe('squat');expect(screen.getAllByRole('option').map(option=>option.value)).toEqual(Object.keys(BODYWEIGHT_RECORDING_EXERCISES));expect(screen.getAllByRole('option')).toHaveLength(42);
+ expect(screen.getByLabelText('따라 할 운동').value).toBe('shoulder_press');expect(screen.getAllByRole('option').map(option=>option.value).sort()).toEqual(Object.keys(COACHING_CATALOG).sort());expect(screen.getAllByRole('option')).toHaveLength(74);
  expect(screen.getByTestId('coach').dataset.immersive).toBe('true');expect(screen.getByRole('link',{name:'운동 홈으로 돌아가기'}).getAttribute('href')).toBe('/health');
 });
 it.each([['sit_stand','sit_stand'],['wall_push','wall_push'],['full_pushup','push_up'],['hinge','hip_hinge'],['bridge','glute_bridge']])('accepts recording route %s and normalizes its supported aliases', (requested,expected)=>{

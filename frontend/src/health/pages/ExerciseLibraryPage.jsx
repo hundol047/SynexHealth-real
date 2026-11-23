@@ -5,8 +5,7 @@ import {api} from '../../shared/lib/api.js';
 import {Card,Skeleton,ErrorState,EmptyState} from '../../shared/components/ui.jsx';
 import {useApiData} from '../lib/useApiData.js';
 import {CATEGORY_LABELS,EQUIPMENT_LABELS,equipmentText} from '../lib/exerciseLabels.js';
-import {BODYWEIGHT_EXERCISES,bodyweightRecordingMotionId} from '../components/exercise/bodyweightGuide.js';
-import {cameraMotionId} from '../components/exercise/motionGuide.js';
+import {coachingMotionId} from '../components/exercise/coachingCatalog.js';
 import ExerciseCard from '../components/exercise/ExerciseCard.jsx';
 import '../components/exercise/exercise-experience.css';
 const ExerciseMotion=lazy(()=>import('../components/exercise/ExerciseMotion.jsx'));
@@ -35,7 +34,7 @@ export default function ExerciseLibraryPage(){
  if(loading)return <Skeleton/>;
  if(error)return <ErrorState message={error.message} onRetry={reload}/>;
  const list=data||[], term=query.trim().toLowerCase();
- const filtered=list.filter(e=>(!poseOnly||(e.training_type==='bodyweight'&&!!BODYWEIGHT_EXERCISES[cameraMotionId(e.motion_id)]))&&(type==='all'||e.training_type===type)&&(category==='all'||e.category===category)&&(equipment==='all'||e.equipment.includes(equipment))&&`${e.name} ${e.english_name} ${e.target_muscle.join(' ')} ${equipmentText(e.equipment)}`.toLowerCase().includes(term));
+ const filtered=list.filter(e=>(!poseOnly||!!coachingMotionId(e.motion_id))&&(type==='all'||e.training_type===type)&&(category==='all'||e.category===category)&&(equipment==='all'||e.equipment.includes(equipment))&&`${e.name} ${e.english_name} ${e.target_muscle.join(' ')} ${equipmentText(e.equipment)}`.toLowerCase().includes(term));
  const selected=filtered.find(e=>e.id===selectedId);
  function change(setter,value){setter(value);setLimit(12);setSelectedId(null);}
  function selectExercise(id){setSelectedId(id);if(id===selectedId)scrollToStage();}
@@ -49,8 +48,8 @@ export default function ExerciseLibraryPage(){
    <label>운동 부위<select className="text-input" value={category} onChange={e=>change(setCategory,e.target.value)}><option value="all">전체 부위</option>{Object.entries(CATEGORY_LABELS).map(([id,label])=><option key={id} value={id}>{label}</option>)}</select></label>
    {type!=='bodyweight'&&<label>이용할 기구<select className="text-input" value={equipment} onChange={e=>change(setEquipment,e.target.value)}><option value="all">전체 기구</option>{[...new Set(list.flatMap(e=>e.equipment))].map(id=><option key={id} value={id}>{EQUIPMENT_LABELS[id]||id}</option>)}</select></label>}
   </div>
-  <label className="exercise-library-camera-filter"><input type="checkbox" checked={poseOnly} onChange={e=>change(setPoseOnly,e.target.checked)}/><Video size={16}/><span>맨몸 카메라 코칭 지원 운동만 보기</span></label><p className="exercise-library-camera-note">동영상 촬영은 맨몸운동 42종, 실시간 자세 교정은 7종을 지원합니다.</p>
-  {selected&&<section ref={stage} className="exercise-library-stage" style={{'--exercise-header-height':`${headerHeight}px`}} aria-label="선택한 운동 시범"><div className="exercise-library-stage-heading"><div><span>{CATEGORY_LABELS[selected.category]} · {equipmentText(selected.equipment)}</span><h3>{selected.name}</h3></div><button type="button" className="btn btn-ghost" aria-label="선택한 운동 시범 닫기" onClick={()=>setSelectedId(null)}><X size={18}/></button></div>{selected.training_type==='bodyweight'&&bodyweightRecordingMotionId(selected.motion_id)&&<div className="exercise-library-stage-action"><Link className="exercise-library-camera-entry" to={`/health/pose?motion=${bodyweightRecordingMotionId(selected.motion_id)}`}><Video size={16}/> {cameraMotionId(selected.motion_id)?'이 동작 촬영·자세 교정':'이 동작 동영상 촬영'} <ArrowUpRight size={15}/></Link></div>}<Suspense fallback={<p className="exercise-library-stage-loading" role="status">동작을 불러오는 중입니다.</p>}><ExerciseMotion key={selected.id} exercise={toExercise(selected)} onReady={scrollToStage}/></Suspense></section>}
+  <label className="exercise-library-camera-filter"><input type="checkbox" checked={poseOnly} onChange={e=>change(setPoseOnly,e.target.checked)}/><Video size={16}/><span>카메라 코칭 지원 운동만 보기</span></label><p className="exercise-library-camera-note">맨몸 42종·헬스장 32종 모두 카메라 자세 분석과 음성 안내를 지원합니다. 운동별로 관찰 가능한 항목이 다릅니다.</p>
+  {selected&&<section ref={stage} className="exercise-library-stage" style={{'--exercise-header-height':`${headerHeight}px`}} aria-label="선택한 운동 시범"><div className="exercise-library-stage-heading"><div><span>{CATEGORY_LABELS[selected.category]} · {equipmentText(selected.equipment)}</span><h3>{selected.name}</h3></div><button type="button" className="btn btn-ghost" aria-label="선택한 운동 시범 닫기" onClick={()=>setSelectedId(null)}><X size={18}/></button></div>{selected.training_type==='bodyweight'&&coachingMotionId(selected.motion_id)&&<div className="exercise-library-stage-action"><Link className="exercise-library-camera-entry" to={`/health/pose?motion=${coachingMotionId(selected.motion_id)}`}><Video size={16}/> 이 동작 촬영·자세 교정 <ArrowUpRight size={15}/></Link></div>}<Suspense fallback={<p className="exercise-library-stage-loading" role="status">동작을 불러오는 중입니다.</p>}><ExerciseMotion key={selected.id} exercise={toExercise(selected)} onReady={scrollToStage}/></Suspense></section>}
   <div className="exercise-library-results"><p role="status"><SlidersHorizontal size={15}/> 조건에 맞는 운동 <strong>{filtered.length}개</strong></p><Link to="/health/profile" aria-label="내 운동 방식·장비 설정하기">운동·장비 설정 <ArrowUpRight size={14}/></Link></div>
   {!filtered.length&&<EmptyState title="조건에 맞는 운동이 없어요" description="검색어 또는 부위·기구 조건을 바꿔 보세요."/>}
   <div className="exercise-library-grid">{filtered.slice(0,limit).map(e=><ExerciseCard key={e.id} exercise={toExercise(e)} compact selected={selectedId===e.id} onSelect={()=>selectExercise(e.id)}/>)}</div>

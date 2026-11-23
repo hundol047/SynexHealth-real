@@ -19,8 +19,8 @@ test('bodyweight coach opens from home without a server and keeps equal phone pa
  page.on('request',request=>{if(new URL(request.url()).pathname.startsWith('/api/'))serverRequests.push(request.url());});
  await page.goto('/health');
  await page.getByRole('link',{name:'맨몸운동 카메라 코치'}).click();
- await expect(page.getByRole('heading',{name:'맨몸운동 코칭'})).toBeVisible();
- await expect(page.getByLabel('따라 할 운동').locator('option')).toHaveCount(42);
+ await expect(page.getByRole('heading',{name:'운동 자세 코칭'})).toBeVisible();
+ await expect(page.getByLabel('따라 할 운동').locator('option')).toHaveCount(74);
  for(const viewport of [{width:393,height:852},{width:360,height:640}]){
   await page.setViewportSize(viewport);
   const upper=await page.locator('.coach-example').boundingBox(),lower=await page.locator('.coach-camera').boundingBox();
@@ -80,9 +80,10 @@ test('camera permission denial explains how to recover and leaves coaching retry
  await expect(page.getByRole('switch')).not.toBeChecked();
 });
 
-test('personal build enforces local requests and rejects equipment motion URLs',async({page})=>{
+test('personal build enforces local requests and accepts equipment motion URLs',async({page})=>{
  await page.goto('/health/pose?motion=curl');
- await expect(page.getByLabel('따라 할 운동')).toHaveValue('squat');
+ // Gym movements now have camera analysis too, so their links open directly.
+ await expect(page.getByLabel('따라 할 운동')).toHaveValue('curl');
  const boundary=await page.evaluate(async()=>{
   const policy=document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.content;
   let blocked=false;
