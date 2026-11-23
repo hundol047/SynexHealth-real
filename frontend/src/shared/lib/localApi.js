@@ -1,4 +1,4 @@
-import {balancedLocalDays,LOCAL_ROUTINE_VERSION} from './localRoutinePlan.js';
+import {balancedLocalDays,LOCAL_ROUTINE_VERSION,environmentCatalog,preferenceTerms,matchesPreference} from './localRoutinePlan.js';
 import catalog from './localCatalog.json';
 import schools from './localSchools.json';
 import {loadLocalDocument,saveLocalDocument} from './offline.js';
@@ -51,6 +51,17 @@ function body(s){
  const map=new Map((m.segments||[]).map(x=>[x.segment,x])),old=new Map((prev?.segments||[]).map(x=>[x.segment,x]));
  return {measurement:m,previous_measurement:prev,current_measurement_id:m.id,previous_measurement_id:prev?.id||null,body_profile:{gender:s.profile.gender,height_cm:m.height||s.profile.height,birth_date:s.profile.birth_date||null,model_type:'illustrative_human',personal_scan:false},average_comparison:{groups:[],selected_group_id:null,selection_mode:'auto'},reference_comparison:Object.fromEntries(segments.map(id=>[id,{status:map.has(id)?'no_reference':'no_measurement'}])),top_level_deltas:Object.fromEntries(['weight','skeletal_muscle_mass','body_fat_percentage','body_fat_mass'].map(k=>[k+'_delta',delta(m[k],prev?.[k])])),left_right_balance:Object.fromEntries([['arm','LEFT_ARM','RIGHT_ARM'],['leg','LEFT_LEG','RIGHT_LEG']].map(([part,l,r])=>{const a=map.get(l)?.lean_mass_kg,b=map.get(r)?.lean_mass_kg;return [part,{left_kg:a??null,right_kg:b??null,diff_percent:a!=null&&b>0?Number(((a-b)/b*100).toFixed(1)):null}];})),segment_deltas:segments.map(id=>({segment:id,lean_mass_delta_kg:delta(map.get(id)?.lean_mass_kg,old.get(id)?.lean_mass_kg),fat_mass_delta_kg:delta(map.get(id)?.fat_mass_kg,old.get(id)?.fat_mass_kg)}))};
 }
+// Plain statements of how the user's limitations and preferences changed this plan.
+function conditionRationale(p,avoid,exercises){
+ const own=list=>(list||[]).map(x=>String(x).trim()).filter(x=>x&&x!=='없음'&&x.toLowerCase()!=='none');
+ const limits=own(p.limitations),likes=own(p.preferences),terms=preferenceTerms(likes);
+ const excluded=environmentCatalog(p).filter(x=>(x.avoid||[]).some(k=>avoid.includes(k))).length;
+ const chosen=[...new Set(exercises.filter(e=>matchesPreference({name:e.exercise_name,id:e.motion_id},terms)).map(e=>e.exercise_name))];
+ return [
+  limits.length?`제약사항(${limits.join(', ')}): 해당 부위에 부담을 줄 수 있는 동작 ${excluded}개를 후보에서 빼고 구성했습니다.`:'제약사항: 입력 없음 · 장소·장비에 맞는 모든 동작을 후보로 두었습니다.',
+  !likes.length?'선호사항: 입력 없음':chosen.length?`선호사항(${likes.join(', ')}): 같은 동작 유형 안에서 ${chosen.join(', ')}을(를) 우선 배정했습니다.`:`선호사항(${likes.join(', ')}): 이름이 일치하는 동작이 없거나 장소·제약사항으로 제외되어 반영하지 못했습니다. 동작 이름(예: 스쿼트, 브리지)으로 적으면 우선 배정합니다.`,
+ ];
+}
 export function generateLocalRoutine(s){
  // Without a measurement we still build a conservative starter plan so a new user is never stuck.
  const p=s.exercise,m=latest(s)||null,starter=!m,recent=s.workouts.filter(w=>Date.now()-Date.parse(w.date)<7*86400000);
@@ -62,8 +73,8 @@ export function generateLocalRoutine(s){
  const gentle=starter||p.experience_level==='BEGINNER'||(bmi!=null&&bmi<18.5)||muscleDown||recent.some(w=>(w.rpe??0)>=8);
  const cautious=(bmi!=null&&bmi<18.5)||muscleDown||recent.some(w=>(w.rpe??0)>=8);
  const fatGoal=p.goal==='FAT_MANAGEMENT'||['fat_loss','weight_loss'].includes(s.goal?.strategy);
- const {exercises,day_minutes,day_timing,schedule}=balancedLocalDays(p,{gentle,cautious,fatGoal,avoid});
- return {id:secureUUID(),user_id:LOCAL_ACCOUNT,created_at:now(),based_on_measurement_id:m?.id??null,starter,goal:({GENERAL_HEALTH:'기본 체력 관리',GENERAL_FITNESS:'전반적인 체력 향상',MUSCLE_GAIN:'근력·근육량 향상',FAT_MANAGEMENT:'체지방 관리',BALANCE:'균형 있는 움직임'})[p.goal]||'나의 운동 계획',summary:'이 폰에서 생성한 기본 운동 계획입니다. 여러 근력 동작을 먼저 배정하고 남는 시간에 유산소를 더합니다. 준비운동·실제 시범·휴식을 합산한 시간이며, 근력 세션 사이에는 회복일을 두세요.',duration_weeks:4,days_per_week:p.days_per_week,exercises,day_minutes,day_timing,generated_by:'local_rules',algorithm_version:LOCAL_ROUTINE_VERSION,needs_review:false,rationale:[`운동 경험: ${{BEGINNER:'처음 시작',INTERMEDIATE:'꾸준히 운동 중',ADVANCED:'운동 경험이 많음'}[p.experience_level]} · ${{home:'집',gym:'헬스장',outdoor:'실외'}[p.exercise_location]}`,m?`측정 체중 ${m.weight}kg · 골격근량 ${m.skeletal_muscle_mass}kg`:'체성분 측정값이 없어 낮은 부담으로 시작합니다.',muscleDown?'이전보다 낮은 골격근량 기록이 있어 부담을 낮췄습니다. 측정 차이만으로 근력 저하를 진단하지 않습니다.':'근육량만으로 실제 근력·적정 중량을 추정하지 않습니다.'],notices:['개인용 기본 규칙이며 서버의 전체 추천 알고리즘과 다릅니다.','부위별 측정값과 실제 인구 평균은 만들거나 추정하지 않습니다.','통증·어지럼·흉통이 있으면 즉시 중단하세요.',...(avoid.length?['제약 부위에 부담을 줄 수 있는 동작을 제외했습니다. 제외되지 않은 동작도 통증이 있으면 중단하세요.']:[])],sources:[{title:'Fitbod · 목표·장비·회복을 고려한 운동 구성',url:'https://fitbod.me/'},{title:'Strong · 사용자 조절 타이머와 운동 기록',url:'https://www.strong.app/'},{title:'Nike Training Club · 단계별 프로그램',url:'https://www.nike.com/ntc-app'}],input_snapshot:{weight_kg:m?.weight??null,muscle_kg:m?.skeletal_muscle_mass??null,body_fat_percent:m?.body_fat_percentage??null,profile:structuredClone(p)},schedule,progression:gentle?'적은 세트부터 시작하고 통증과 수행 부담을 기록하세요.':'실제 수행 기록을 확인한 뒤 재생성하세요. 중량은 자동으로 올리지 않습니다.'};
+ const {exercises,day_minutes,day_timing,schedule}=balancedLocalDays(p,{gentle,cautious,fatGoal,avoid,preferences:p.preferences});
+ return {id:secureUUID(),user_id:LOCAL_ACCOUNT,created_at:now(),based_on_measurement_id:m?.id??null,starter,goal:({GENERAL_HEALTH:'기본 체력 관리',GENERAL_FITNESS:'전반적인 체력 향상',MUSCLE_GAIN:'근력·근육량 향상',FAT_MANAGEMENT:'체지방 관리',BALANCE:'균형 있는 움직임'})[p.goal]||'나의 운동 계획',summary:'이 폰에서 생성한 기본 운동 계획입니다. 여러 근력 동작을 먼저 배정하고 남는 시간에 유산소를 더합니다. 준비운동·실제 시범·휴식을 합산한 시간이며, 근력 세션 사이에는 회복일을 두세요.',duration_weeks:4,days_per_week:p.days_per_week,exercises,day_minutes,day_timing,generated_by:'local_rules',algorithm_version:LOCAL_ROUTINE_VERSION,needs_review:false,rationale:[`운동 경험: ${{BEGINNER:'처음 시작',INTERMEDIATE:'꾸준히 운동 중',ADVANCED:'운동 경험이 많음'}[p.experience_level]} · ${{home:'집',gym:'헬스장',outdoor:'실외'}[p.exercise_location]}`,m?`측정 체중 ${m.weight}kg · 골격근량 ${m.skeletal_muscle_mass}kg`:'체성분 측정값이 없어 낮은 부담으로 시작합니다.',muscleDown?'이전보다 낮은 골격근량 기록이 있어 부담을 낮췄습니다. 측정 차이만으로 근력 저하를 진단하지 않습니다.':'근육량만으로 실제 근력·적정 중량을 추정하지 않습니다.',...conditionRationale(p,avoid,exercises)],notices:['개인용 기본 규칙이며 서버의 전체 추천 알고리즘과 다릅니다.','부위별 측정값과 실제 인구 평균은 만들거나 추정하지 않습니다.','통증·어지럼·흉통이 있으면 즉시 중단하세요.',...(avoid.length?['제약 부위에 부담을 줄 수 있는 동작을 제외했습니다. 제외되지 않은 동작도 통증이 있으면 중단하세요.']:[])],sources:[{title:'Fitbod · 목표·장비·회복을 고려한 운동 구성',url:'https://fitbod.me/'},{title:'Strong · 사용자 조절 타이머와 운동 기록',url:'https://www.strong.app/'},{title:'Nike Training Club · 단계별 프로그램',url:'https://www.nike.com/ntc-app'}],input_snapshot:{weight_kg:m?.weight??null,muscle_kg:m?.skeletal_muscle_mass??null,body_fat_percent:m?.body_fat_percentage??null,profile:structuredClone(p)},schedule,progression:gentle?'적은 세트부터 시작하고 통증과 수행 부담을 기록하세요.':'실제 수행 기록을 확인한 뒤 재생성하세요. 중량은 자동으로 올리지 않습니다.'};
 }
 let chain=Promise.resolve();
 function restoredDocument(backup){

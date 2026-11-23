@@ -6,15 +6,23 @@ const patterns=['squat','push','pull','hinge','core'];
 const preferred=['sit_stand','wall_push','scapular','bridge','dead_bug','walk'];
 const weekdays={1:[1],2:[1,4],3:[1,3,5],4:[1,2,4,6],5:[1,2,3,5,6],6:[1,2,3,4,5,6],7:[1,2,3,4,5,6,7]};
 const strengthSlots={1:[0],2:[0,1],3:[0,1,2],4:[0,2,3],5:[0,2,4],6:[0,2,4],7:[0,2,4]};
+const compact=t=>String(t).toLowerCase().replace(/\s+/g,'');
+// Preferences name exercises (e.g. "스쿼트", "브리지"); free-form goals that name no exercise are reported as unmatched.
+export const preferenceTerms=list=>(list||[]).map(compact).filter(t=>t.length>=2&&t!=='없음'&&t!=='none');
+export const matchesPreference=(x,terms)=>terms.some(t=>{const n=compact(x.name);return n.includes(t)||t.includes(n)||t===x.id;});
+// Exercises the place, equipment and mode allow, before limitations or preferences.
+export const environmentCatalog=profile=>catalog.filter(x=>x.auto_recommend!==false&&x.difficulty!=='advanced'&&x.locations.includes(profile.exercise_location)&&x.equipment.every(k=>profile.available_equipment.includes(k))&&(profile.training_mode!=='bodyweight'||!x.equipment.length));
 const seconds=exercises=>Math.ceil(buildTempoPlan(exercises).reduce((sum,s)=>sum+s.durationMs,0)/1000);
-export function balancedLocalDays(profile,{gentle=false,cautious=false,fatGoal=false,avoid=[]}={}){
- const allowed=catalog.filter(x=>x.auto_recommend!==false&&x.difficulty!=='advanced'&&x.locations.includes(profile.exercise_location)&&x.equipment.every(k=>profile.available_equipment.includes(k))&&(profile.training_mode!=='bodyweight'||!x.equipment.length)&&!(x.avoid||[]).some(k=>avoid.includes(k)));
+export function balancedLocalDays(profile,{gentle=false,cautious=false,fatGoal=false,avoid=[],preferences=[]}={}){
+ const terms=preferenceTerms(preferences),allowed=environmentCatalog(profile).filter(x=>!(x.avoid||[]).some(k=>avoid.includes(k)));
  const pick=(pattern,variation=0)=>{
   let candidates=allowed.filter(x=>x.pattern===pattern);
   if(gentle&&candidates.some(x=>x.easy))candidates=candidates.filter(x=>x.easy);
   const score=x=>(profile.training_mode==='equipment'&&x.equipment.length?30:0)+(preferred.includes(x.id)?3:0);
   candidates.sort((a,b)=>score(b)-score(a));
-  const best=candidates.filter(x=>Boolean(x.equipment.length)===Boolean(candidates[0]?.equipment.length));
+  // A preferred exercise leads its movement pattern; safety, place and the beginner filter still apply first.
+  const liked=candidates.filter(x=>matchesPreference(x,terms));
+  const best=liked.length?liked:candidates.filter(x=>Boolean(x.equipment.length)===Boolean(candidates[0]?.equipment.length));
   return best.length?best[variation%Math.min(best.length,2)]:undefined;
  };
  const exercise=(x,day)=>({exercise_id:`d${day}-${x.id}`,motion_id:x.motion_id||x.id,exercise_name:x.name,day_number:day,target_regions:x.regions,training_type:x.training_type,equipment:x.equipment,instructions:x.instructions,cautions:x.cautions,sets:1,reps:'6',dose_type:x.dose_type,hold_seconds:x.dose_type==='hold'?20:undefined,duration_seconds:x.dose_type==='duration'?60:undefined,intensity:'자세를 유지할 수 있는 부담 · 통증 없는 범위',reason:'하체·밀기·등·엉덩이·몸통을 골고루 배정하고 실제 시범·휴식 시간을 합산했습니다.',rest_seconds:recommendedRest({motion_id:x.motion_id||x.id,equipment:x.equipment,dose_type:x.dose_type}).seconds,transition_seconds:x.equipment.length?30:20});

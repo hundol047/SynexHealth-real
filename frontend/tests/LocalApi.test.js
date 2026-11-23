@@ -83,3 +83,16 @@ it('builds a routine around known limitations like the server and blocks only ou
   await expect(localApi('/api/exercise-routines/generate',{})).rejects.toMatchObject({status:409});
  }
 });
+it('explains how limitations and preferences shaped the plan and prefers named exercises',async()=>{
+ await localApi('/api/body-composition',measurement);
+ let r=await localApi('/api/exercise-routines/generate',{});
+ expect(r.rationale).toContain('제약사항: 입력 없음 · 장소·장비에 맞는 모든 동작을 후보로 두었습니다.');expect(r.rationale).toContain('선호사항: 입력 없음');
+ await localApi('/api/exercise-profile',{limitations:['무릎 통증'],preferences:['브리지']},{method:'PUT'});
+ r=await localApi('/api/exercise-routines/generate',{});
+ expect(r.rationale.find(t=>t.startsWith('제약사항(무릎 통증)'))).toMatch(/동작 \d+개를 후보에서 빼고/);
+ expect(r.rationale.find(t=>t.startsWith('선호사항(브리지)'))).toContain('글루트 브리지');
+ expect(r.exercises.some(e=>e.exercise_name==='글루트 브리지')).toBe(true);
+ await localApi('/api/exercise-profile',{limitations:[],preferences:['하체 균형 개선']},{method:'PUT'});
+ r=await localApi('/api/exercise-routines/generate',{});
+ expect(r.rationale.find(t=>t.startsWith('선호사항(하체 균형 개선)'))).toContain('반영하지 못했습니다');
+});

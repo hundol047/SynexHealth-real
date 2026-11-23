@@ -7,9 +7,10 @@ export function personalizedVertices(measurement={},profile={}) {
 }
 // Original, unbranded garments share the body's topology and joint weights.
 // Covered body faces are omitted so skin cannot poke through the opaque clothing.
-export function sportswear(base,stature=1,gender) {
+// barefoot: exercise demonstrations show bare feet; separate shoe meshes never fit the animated foot.
+export function sportswear(base,stature=1,gender,{barefoot=false}={}) {
  const positions=base.slice(),indices={skin:[],top:[],bottom:[],shoes:[]};
- const materialAt=(x,y)=>y<.13?'shoes':y<.94?(gender==='male'&&y<.57?'skin':'bottom'):y<1.49&&(Math.abs(x)<.265||y>1.27)?'top':'skin';
+ const materialAt=(x,y)=>y<.13?(barefoot?'skin':'shoes'):y<.94?(gender==='male'&&y<.57?'skin':'bottom'):y<1.49&&(Math.abs(x)<.265||y>1.27)?'top':'skin';
  const labels=[];
  for(let i=0;i<base.length;i+=3){const x=base[i],y=base[i+1]/stature,z=base[i+2];const label=materialAt(x,y);labels.push(label);
   if(label==='top') {positions[i]=x*1.015;positions[i+2]=z+Math.sign(z-.035)*.006;}

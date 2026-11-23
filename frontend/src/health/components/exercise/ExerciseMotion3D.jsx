@@ -14,7 +14,6 @@ import pixieHairAtlas from '../character/assets/short03.webp';
 import sleekHairAtlas from '../character/assets/medium-layered.webp';
 import sleekHairNormal from '../character/assets/medium-layered-normal.webp';
 import naturalShortHairAtlas from '../character/assets/short02.webp';
-import Footwear from '../body3d/Footwear.jsx';
 import { exerciseAvatarGeometry, exerciseMaterials } from './exerciseAppearance.js';
 import ExerciseEquipment from './ExerciseEquipment.jsx';
 import { exerciseCameraPreset } from './exerciseCamera.js';
@@ -123,7 +122,6 @@ function Athlete({ motion, progress, mirror, measurement, profile, compact, ligh
         renderer.domElement.dataset.exerciseVertices = String(model.geometry.attributes.position.count);
       }}/>
       {appearance === 'athlete' && <HeadDetail hairNormal={character.hairStyle==='sleek'?normalAtlas:null} hairAtlas={hairAtlas} base={model.headBase} scale={model.scale} rest={model.rest} joints={joints} character={character} progress={progress}/>}
-      <Footwear anchors={shoes}/>
     </group>
     <ExerciseEquipment motion={motion} joints={joints} rest={model.rest} progress={progress} heightScale={model.scale}/>
   </group>;

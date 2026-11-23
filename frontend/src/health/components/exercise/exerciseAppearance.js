@@ -11,7 +11,7 @@ const gaussian = (x, y, cx, cy, sx, sy) => Math.exp(-(((x - cx) / sx) ** 2 + ((y
 // rather than along a vertical plane through the world.
 export function exerciseGarmentAt(x, y, z, original = 'skin', character) {
   if(character){
-    if(y<.13)return 'shoes';
+    if(y<.13)return 'skin';
     if(y<.965&&Math.abs(x)>.32)return 'skin';
     if(y<.965)return (character.pants==='shorts'&&y<.70)?'skin':'bottom';
     const arm=Math.abs(x)>.185;

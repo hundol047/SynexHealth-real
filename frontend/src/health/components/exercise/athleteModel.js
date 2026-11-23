@@ -39,7 +39,7 @@ export function prepareAthlete(measurement,profile={},character){
  const scale=morphParameters(measurement,profile).heightScale;
  const base=characterSurface(personalizedVertices(measurement,profile),c,scale);
  if(!bindings.has(gender))bindings.set(gender,bindSurface(personalizedVertices({height:178,weight:70,body_fat_percentage:20,skeletal_muscle_mass:32},{gender})));
- const weights=bindings.get(gender),wear=fitExerciseClothing(sportswear(base,scale,gender),scale,c);
+ const weights=bindings.get(gender),wear=fitExerciseClothing(sportswear(base,scale,gender,{barefoot:true}),scale,c);
  const flat=morphPositions(Float32Array.from(REST.flat()),measurement,profile),rest=REST.map((_,i)=>Array.from(flat.slice(i*3,i*3+3)));
  const shoes=footwearAnchors(base);rest.heelContactHeights=heelContactHeights(shoes,rest);
  rest.handGripScale=calibrateGripScale(wear.positions,weights,rest);rest.wallSupport=calibrateWallSupport(wear.positions,weights,rest);
