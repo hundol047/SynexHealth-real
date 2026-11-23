@@ -28,8 +28,11 @@ export function refineExerciseHands(motion, joints, rest) {
   for (const side of [0, 1]) {
     const { wrist, finger, sign, along, back } = handRestFrame(rest, side);
     const handScale = h * (rest.handGripScale?.[side] || 1);
-    const direction = [-sign, 0, 0], palmBack = [0, 0, sign];
-    const target = center.clone().add(new THREE.Vector3(sign * .174 * handScale, (side ? .074 : -.060) * handScale, -sign * .004 * handScale));
+    // Palms face each other with the fingers angled forward and up, the way
+    // hands actually meet in front of the chest. Pointing both hands straight
+    // across the body forced one palm outward and wrung that forearm.
+    const direction = vector([-sign * .5, .38, .78]).normalize().toArray(), palmBack = [sign, .1, .25];
+    const target = center.clone().add(new THREE.Vector3(sign * .088 * handScale, (side ? .012 : -.012) * handScale, -.05 * handScale));
     solveLimb(joints, rest, side, 'arm', target.toArray(), [sign * .7, -.7, -.1]);
     joints[finger] = vector(joints[wrist]).addScaledVector(vector(direction), segmentLength(rest, wrist, finger)).toArray();
     const rotation = orientation(direction, palmBack).multiply(orientation(along.toArray(), back.toArray()).invert());

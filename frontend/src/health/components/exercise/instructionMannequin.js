@@ -54,8 +54,94 @@ export function applyMannequinColors(geometry, stature, motion) {
   geometry.clearGroups();
   geometry.addGroup(0, geometry.index.count, 0);
 }
-export function mannequinMaterials() {
-  const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .78, metalness: 0, side: THREE.DoubleSide });
+// Order of the per-pixel muscle regions in the mannequin shader.
+export const MANNEQUIN_REGIONS = ['thighFront', 'thighBack', 'glutes', 'chest', 'back', 'upperBack', 'core', 'shoulders', 'biceps', 'triceps', 'calves'];
+// Which shader regions a motion lights up. The catalog names both upper-arm muscles as one
+// surface region; the shader separates the front (biceps) from the back (triceps).
+export function mannequinRegionWeights(motion) {
+  const guide = mannequinGuide(motion);
+  const flags = (regions, label) => MANNEQUIN_REGIONS.map(region =>
+    region === 'biceps' ? Number(regions.includes('upperArms') && (label.includes('이두') || !label.includes('삼두')))
+      : region === 'triceps' ? Number(regions.includes('upperArms') && (label.includes('삼두') || !label.includes('이두')))
+        : Number(regions.includes(region)));
+  return { primary: flags(guide.primary, guide.primaryLabel), secondary: flags(guide.secondary, guide.secondaryLabel) };
+}
+// The surface is drawn per pixel from the rest-pose position, so muscle shapes and the grooves
+// between them stay sharp at any zoom and move with the body. They are a teaching diagram of
+// broad surface regions: not segmented anatomy and not a measurement of muscle use.
+const MANNEQUIN_SHADER = /* glsl */`
+  float mBand(float v,float a,float b,float f){return smoothstep(a-f,a,v)*(1.-smoothstep(b,b+f,v));}
+  float mLine(float v,float c,float w){float d=(v-c)/w;return exp(-d*d);}
+  void mannequinSurface(vec3 p,out float regions[11],out float groove,out float lift){
+    float ax=abs(p.x),y=p.y,z=p.z;
+    float front=smoothstep(.015,.07,z),back=1.-smoothstep(-.04,.02,z);
+    // Thigh and shin cross-sections: which way a point faces around the leg's own axis.
+    float thighX=mix(.14,.10,clamp((y-.52)/.38,0.,1.));
+    vec2 thigh=vec2(ax-thighX,z-.045);float thighFacing=thigh.y/max(length(thigh),.001);
+    float shinX=mix(.19,.14,clamp((y-.10)/.42,0.,1.));
+    vec2 shin=vec2(ax-shinX,z-.04);float shinFacing=shin.y/max(length(shin),.001);
+    // Upper arm: position along the shoulder-elbow line and facing around it.
+    vec3 shoulder=vec3(.185,1.42,.02),armAxis=normalize(vec3(.14,-.17,.02)),q=vec3(ax,y,z)-shoulder;
+    float along=dot(q,armAxis)/.221;vec3 around=q-armAxis*dot(q,armAxis);float armFacing=around.z/max(length(around),.001);
+    float onArm=smoothstep(.19,.22,ax)*mBand(along,.20,.94,.07);
+    float legs=1.-smoothstep(.22,.28,ax);
+    // Quadriceps: the top follows the groin crease up toward the hip bone and
+    // the bottom tapers into the kneecap, instead of a straight-edged block.
+    float quadTop=mix(.83,.93,smoothstep(.03,.2,ax)),quadBottom=.555+.9*abs(thigh.x);
+    regions[0]=smoothstep(quadBottom-.02,quadBottom+.02,y)*(1.-smoothstep(quadTop-.03,quadTop+.01,y))*smoothstep(-.12,.3,thighFacing)*legs;
+    regions[1]=mBand(y,.60,.86,.03)*smoothstep(-.02,.4,-thighFacing)*legs;
+    regions[2]=back*(1.-smoothstep(.72,1.,length(vec2((ax-.088)/.118,(y-.935)/.098))));
+    regions[3]=front*(1.-smoothstep(.78,1.,length(vec2((ax-.088)/.108,(y-1.335)/.088))))*smoothstep(.003,.012,ax);
+    regions[4]=back*mBand(y,1.04,1.40,.03)*(1.-smoothstep(0.,.03,ax-(.075+(y-1.04)*.40)))*smoothstep(.006,.016,ax);
+    regions[5]=back*mBand(y,1.31,1.53,.02)*(1.-smoothstep(0.,.03,ax-(.17-abs(y-1.43)*1.25)));
+    regions[6]=front*mBand(y,1.03,1.25,.02)*(1.-smoothstep(.10,.15,ax));
+    regions[7]=1.-smoothstep(.062,.094,length(vec3(ax-.205,y-1.415,(z-.02)*.8)));
+    regions[8]=onArm*smoothstep(-.30,.30,armFacing);
+    regions[9]=onArm*smoothstep(-.30,.30,-armFacing);
+    regions[10]=mBand(y,.25,.50,.03)*smoothstep(-.20,.30,-shinFacing)*legs;
+    float g=0.;
+    g+=front*mLine(ax,0.,.0045)*mBand(y,1.03,1.45,.02);
+    g+=front*(mLine(y,1.085,.004)+mLine(y,1.14,.004)+mLine(y,1.195,.004))*(1.-smoothstep(.068,.088,ax))*.85;
+    g+=front*mLine(ax,.088,.004)*mBand(y,1.04,1.24,.02)*.65;
+    g+=front*mLine(y,1.258+3.2*(ax-.088)*(ax-.088),.005)*(1.-smoothstep(.165,.195,ax))*smoothstep(.008,.03,ax);
+    g+=front*mLine(y,1.468-.10*ax,.004)*(1.-smoothstep(.15,.18,ax))*smoothstep(.02,.04,ax)*.55;
+    g+=back*mLine(ax,0.,.006)*mBand(y,.87,1.47,.02);
+    g+=back*mLine(y,.848,.006)*(1.-smoothstep(.17,.21,ax))*.8;
+    g+=back*mLine(length(vec2(ax-.10,y-1.365)),.078,.004)*.45;
+    g+=mBand(y,.58,.88,.03)*mLine(thighFacing,0.,.14)*legs*.45;
+    g+=mBand(y,.30,.47,.03)*mLine(shin.x,0.,.005)*smoothstep(0.,.4,-shinFacing)*legs*.6;
+    g+=mLine(length(vec3(ax-.205,y-1.415,(z-.02)*.8)),.094,.004)*.5;
+    g+=onArm*mLine(armFacing,0.,.16)*.4;
+    groove=clamp(g,0.,1.);
+    // Kneecap and shin read as bone, slightly lighter than the muscle around them.
+    lift=(1.-smoothstep(.7,1.,length(vec2(thigh.x/.036,(y-.525)/.042))))*smoothstep(0.,.3,thighFacing)*legs;
+  }
+`;
+export function mannequinMaterials(motion) {
+  const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .66, metalness: 0, side: THREE.DoubleSide });
+  const weights = mannequinRegionWeights(motion);
+  material.onBeforeCompile = shader => {
+    shader.uniforms.mannequinPrimary = { value: weights.primary };
+    shader.uniforms.mannequinSecondary = { value: weights.secondary };
+    shader.uniforms.mannequinNeutral = { value: new THREE.Color(MANNEQUIN_COLORS.neutral) };
+    shader.uniforms.mannequinMain = { value: new THREE.Color(MANNEQUIN_COLORS.primary) };
+    shader.uniforms.mannequinAssist = { value: new THREE.Color(MANNEQUIN_COLORS.secondary) };
+    shader.vertexShader = 'attribute vec3 characterRest; varying vec3 vMannequinRest;\n' + shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvMannequinRest = characterRest;');
+    shader.fragmentShader = 'uniform float mannequinPrimary[11]; uniform float mannequinSecondary[11]; uniform vec3 mannequinNeutral; uniform vec3 mannequinMain; uniform vec3 mannequinAssist; varying vec3 vMannequinRest;\n'
+      + MANNEQUIN_SHADER + shader.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
+      float mRegions[11];float mGroove;float mLift;
+      mannequinSurface(vMannequinRest,mRegions,mGroove,mLift);
+      float mMain=0.,mAssist=0.,mAny=0.;
+      for(int i=0;i<11;i++){mMain=max(mMain,mRegions[i]*mannequinPrimary[i]);mAssist=max(mAssist,mRegions[i]*mannequinSecondary[i]);mAny=max(mAny,mRegions[i]);}
+      // Every muscle region is a touch lighter than the tissue between; grooves are darker.
+      vec3 mBase=mannequinNeutral*(1.+.035*mAny+.06*mLift);
+      mBase=mix(mBase,mannequinAssist,mAssist*.9);
+      mBase=mix(mBase,mannequinMain,mMain*(.82+.18*mMain));
+      // Head, hands and feet keep the plain surface: no diagram is drawn on them.
+      float mBody=smoothstep(.12,.16,vMannequinRest.y)*(1.-smoothstep(1.52,1.56,vMannequinRest.y));
+      diffuseColor.rgb=mix(mannequinNeutral,mBase*(1.-.24*mGroove),mBody);`);
+  };
+  material.customProgramCacheKey = () => 'synex-instruction-mannequin-v3';
   return { materials: [material], dispose: () => material.dispose() };
 }
 

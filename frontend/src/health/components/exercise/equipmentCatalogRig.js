@@ -95,7 +95,7 @@ export function equipmentCatalogPose(id, progress, rest) {
       const side = i === 0 ? 1 : -1, root = arm[i][0];
       if (id === 'goblet_squat') setArm(i, [side * .215 * h, joints[1][1] - .135 * h, joints[1][2] + .17 * h], [side * .5, -1, .1]);
       else if (id === 'barbell_squat') setArm(i, [side * .32 * h, joints[1][1] - .08 * h, joints[1][2] - .15 * h], [side, -1, -.3]);
-      else setArm(i, [side * (id === 'barbell_rdl' ? .25 : .22) * h, joints[root][1] - (length(root, root + 1) + length(root + 1, root + 2)) * .975, joints[root][2] + .035 * h], [0, 0, 1]);
+      else setArm(i, [side * (id === 'barbell_rdl' ? .25 : .22) * h, joints[root][1] - (length(root, root + 1) + length(root + 1, root + 2)) * .975, joints[root][2] + .035 * h], [side * .4, 0, -1]);
     }
     if (id === 'goblet_squat') data.grip = 'goblet';
   } else if (id === 'dumbbell_split_squat') {
@@ -130,7 +130,7 @@ export function equipmentCatalogPose(id, progress, rest) {
     relaxedArms();
     // Hands rest on the side supports; they do not dangle through the seat.
     if (['leg_extension', 'seated_leg_curl', 'machine_hip_abduction'].includes(id)) {
-      arm.forEach(([root], i) => setArm(i, [joints[root][0] + (i === 0 ? .025 : -.025) * h, joints[root][1] - (length(root, root + 1) + length(root + 1, root + 2)) * .975, .035 * h], [i === 0 ? 1 : -1, 0, .3], [0, 0, 1]));
+      arm.forEach(([root], i) => setArm(i, [joints[root][0] + (i === 0 ? .025 : -.025) * h, joints[root][1] - (length(root, root + 1) + length(root + 1, root + 2)) * .975, .035 * h], [i === 0 ? 1 : -1, 0, -.3], [0, 0, 1]));
     }
     if (id === 'leg_extension' || id === 'seated_leg_curl') {
       const theta = id === 'leg_extension' ? 1.38 * e : 1.18 - 1.50 * e;
@@ -233,7 +233,9 @@ export function equipmentCatalogPose(id, progress, rest) {
       } else if (id === 'lateral_raise' || id === 'front_raise') {
         const theta = .04 + 1.31 * e, lateral = id === 'lateral_raise';
         armFK(i, lateral ? [side * Math.sin(theta), -Math.cos(theta), 0] : [0, -Math.cos(theta), Math.sin(theta)], lateral ? [side * Math.sin(theta), -Math.cos(theta), .12] : [0, -Math.cos(theta), Math.sin(theta + .075)]);
-        data.gripAxes = [[0, 0, 1], [0, 0, 1]];
+        // Palms down on both sides. One shared axis turned the second palm up
+        // and wrung that forearm half a turn at the elbow.
+        if (lateral) data.gripAxes = [[0, 0, 1], [0, 0, -1]];
       } else if (id === 'triceps_extension') {
         const theta = 2.02 * (1 - e);
         const transverse = (side * .215 * h - shoulder[0]) / (length(root, root + 1) + length(root + 1, root + 2));
@@ -241,7 +243,7 @@ export function equipmentCatalogPose(id, progress, rest) {
         armFK(i, [transverse, sagittal, 0], [transverse, sagittal * Math.cos(theta), -sagittal * Math.sin(theta)]);
         // Separate neutral-grip weights follow the forearms. Forcing both
         // hands inward toward one vertical weight bent each wrist ~94 degrees.
-        data.gripAxes = [[0, Math.sin(theta), Math.cos(theta)], [0, -Math.sin(theta), -Math.cos(theta)]];
+        data.gripAxes = [[0, -Math.sin(theta), -Math.cos(theta)], [0, Math.sin(theta), Math.cos(theta)]];
       } else if (id === 'dumbbell_shrug') {
         // Scapular elevation rather than a spurious elbow curl or torso lift.
         joints[root][1] += .040 * h * e;
@@ -266,9 +268,14 @@ export function equipmentCatalogPose(id, progress, rest) {
       }
     }
   }
-  if (!data.gripAxes) data.gripAxes = [[1, 0, 0], [1, 0, 0]];
+  // The back of the hand is gripAxis × hand direction. An overhand grip is the
+  // default: the old underhand default left presses, pulldowns and deadlift-style
+  // holds with palms reversed and the forearm twisted half a turn to compensate.
+  if (!data.gripAxes) data.gripAxes = id === 'curl' ? [[1, 0, 0], [1, 0, 0]] : [[-1, 0, 0], [-1, 0, 0]];
+  // Weights and relaxed hands carried at the sides face the thighs.
+  if (['dumbbell_shrug', 'dumbbell_split_squat', 'dumbbell_row', 'treadmill_walk'].includes(id)) data.gripAxes = [[0, 0, 1], [0, 0, -1]];
   if (id === 'hammer_curl') data.gripAxes[1] = data.gripAxes[0].map(value => -value);
-  if (['machine_chest_press', 'machine_row', 'cable_face_pull', 'goblet_squat', 'elliptical'].includes(id)) data.gripAxes = [[0, 1, 0], [0, -1, 0]];
+  if (['machine_chest_press', 'machine_row', 'goblet_squat', 'elliptical', 'cable_pallof'].includes(id)) data.gripAxes = [[0, 1, 0], [0, -1, 0]];
   if (['leg_press', 'leg_extension', 'seated_leg_curl', 'machine_hip_abduction'].includes(id)) {
     data.gripAxes = [[0, 0, 1], [0, 0, -1]];
     arm.forEach(([, , wrist, finger]) => { joints[finger] = v(joints[wrist]).add(new THREE.Vector3(0, -length(wrist, finger), 0)).toArray(); });

@@ -9,7 +9,39 @@ import {refineExerciseHands} from './handPoses.js';
 // Rest joints in the CC0 mesh coordinate system. Segment transforms are blended at joints.
 export const REST=[[0,.94,.035],[0,1.42,.025],[0,1.66,.025],[.185,1.42,.02],[.325,1.25,.04],[.445,1.105,.13],[-.185,1.42,.02],[-.325,1.25,.04],[-.445,1.105,.13],[.1,.90,.035],[.14,.52,.05],[.19,.1,.035],[-.1,.90,.035],[-.14,.52,.05],[-.19,.1,.035],[.19,.04,.20],[-.19,.04,.20],[.565,.965,.25],[-.565,.965,.25]];
 export const BONES=[[0,1],[1,2],[3,4],[4,5],[6,7],[7,8],[9,10],[10,11],[12,13],[13,14],[11,15],[14,16],[5,17],[8,18]];
-export function poseJoints(id,t,rest=REST){
+export function poseJoints(id,t,rest=REST){return naturalElbows(authoredJoints(id,t,rest),rest);}
+// An elbow only folds one way. Several hanging-arm poses placed the elbow in
+// front of the shoulder→wrist line, which reads as an arm bent backward. With
+// the hand by the hip, mirror such an elbow behind that line; bone lengths and
+// the authored wrist position are unchanged.
+function naturalElbows(joints,rest){
+ if(joints===rest)return joints;
+ const up=vec(joints[1]).sub(vec(joints[0])).normalize(),front=vec(joints[3]).sub(vec(joints[6])).cross(up).normalize();
+ for(const [side,shoulder,elbow,wrist,finger] of [[0,3,4,5,17],[1,6,7,8,18]]){
+  if(joints.boneRotations?.[12+side]||joints.boneRotations?.[3+side*2])continue;
+  const root=vec(joints[shoulder]),hand=vec(joints[wrist]),axis=hand.clone().sub(root),reach=axis.length();
+  if(reach<1e-6)continue;axis.divideScalar(reach);
+  // Upright bodies only: on the floor the mat, not the torso, decides where an elbow can go.
+  const hanging=smooth(.45,.7,-axis.dot(up))*smooth(.5,.75,up.y);
+  if(hanging<=0)continue;
+  const normal=front.clone().addScaledVector(axis,-front.dot(axis));
+  if(normal.lengthSq()<.04)continue;normal.normalize();
+  const bend=vec(joints[elbow]),forward=bend.clone().sub(root).dot(normal);
+  if(forward<=0)continue;
+  const before=hand.clone().sub(bend).normalize();
+  bend.addScaledVector(normal,-(1+hanging)*forward);
+  // Partial mirroring near the threshold keeps the motion continuous; restore exact lengths.
+  const upper=vec(joints[elbow]).distanceTo(root),lower=vec(joints[elbow]).distanceTo(hand);
+  const along=(upper*upper-lower*lower+reach*reach)/(2*reach),out=bend.clone().sub(root);out.addScaledVector(axis,-out.dot(axis));
+  if(out.lengthSq()<1e-12)out.copy(normal).negate();
+  out.normalize().multiplyScalar(Math.sqrt(Math.max(0,upper*upper-along*along)));
+  joints[elbow]=root.clone().addScaledVector(axis,along).add(out).toArray();
+  const after=hand.clone().sub(vec(joints[elbow])).normalize();
+  joints[finger]=hand.clone().add(vec(joints[finger]).sub(hand).applyQuaternion(new THREE.Quaternion().setFromUnitVectors(before,after))).toArray();
+ }
+ return joints;
+}
+function authoredJoints(id,t,rest){
  const stretch=stretchPoseJoints(id,t,rest);if(stretch)return stretch;
  const bodyweight=bodyweightPoseJoints(id,t,rest);if(bodyweight)return refineExerciseHands(id,bodyweight,rest);
  const authored=standingCatalogPose(id,t,rest)||floorCatalogPose(id,t,rest)||equipmentCatalogPose(id,t,rest);if(authored)return refineExerciseHands(id,authored,rest);
@@ -55,8 +87,8 @@ export function bindSurface(base){
   // region. A constant shoulder-width mask incorrectly bound the hips to the
   // forearms, pulling the shirt hem outward whenever the arms were raised.
   const shoulder=smooth(1.02,1.19,y);
-  const head=smooth(1.47,1.56,y),arm=smooth(.26-.10*shoulder,.34-.07*shoulder,Math.abs(x))*smooth(.84,.91,y)*(1-head),leg=(1-smooth(.85,1.02,y))*(1-arm);
-  const trunk=Math.max(0,1-head-arm-leg),elbow=smooth(1.20,1.29,y),knee=smooth(.47,.57,y);
+  const head=smooth(1.47,1.56,y);let arm=smooth(.26-.10*shoulder,.34-.07*shoulder,Math.abs(x))*smooth(.84,.91,y)*(1-head);
+  const leg=(1-smooth(.85,1.02,y))*(1-arm),trunk=Math.max(0,1-head-arm-leg),elbow=smooth(1.20,1.29,y),knee=smooth(.47,.57,y);
   const armIndex=x>=0?2:4,legIndex=x>=0?6:8,footIndex=x>=0?10:11,foot=1-smooth(.12,.21,y);
   // Blend along the wrist's anatomical axis. A world-X mask gave opposite
   // sides of the same wrist different hand/forearm weights, pinching and
@@ -106,13 +138,15 @@ export function rigRotation(joints,index,rest=REST){
 }
 // Normalized dual-quaternion blending preserves rigid volume around bent joints.
 // Original implementation of the published algorithm (Kavan et al., 2008).
+const SHOULDER_LINEAR=.8;
 export function deformSurface(base,weights,joints,target,rest=REST,ground=true){
  const transforms=BONES.map(([a,b],index)=>{
   const rotation=rigRotation(joints,index,rest);
   const t=vec(joints[a]).sub(vec(rest[a]).applyQuaternion(rotation));
   const dual=new THREE.Quaternion(t.x,t.y,t.z,0).multiply(rotation);
-  return {real:rotation.toArray(),dual:dual.toArray().map(v=>v*.5)};
+  return {real:rotation.toArray(),dual:dual.toArray().map(v=>v*.5),rotation,offset:t};
  });
+ const rigid=transforms,p=new THREE.Vector3();
  const v=new THREE.Vector3(),q=new THREE.Quaternion(),d=new THREE.Quaternion(),translation=new THREE.Quaternion(),conjugate=new THREE.Quaternion();
  const spineAxis=joints.spineFlex?vec(joints[1]).sub(vec(joints[0])):null;
  const spineLengthSquared=spineAxis?Math.max(1e-8,spineAxis.lengthSq()):1;
@@ -129,7 +163,19 @@ export function deformSurface(base,weights,joints,target,rest=REST,ground=true){
   if(length<1e-8){for(let k=0;k<3;k++)target[i*3+k]=base[i*3+k];continue;}
   q.set(rx/length,ry/length,rz/length,rw/length);d.set(dx/length,dy/length,dz/length,dw/length);
   translation.copy(d).multiply(conjugate.copy(q).conjugate());
-  v.fromArray(base,i*3).applyQuaternion(q);v.x+=2*translation.x;v.y+=2*translation.y;v.z+=2*translation.z;v.toArray(target,i*3);
+  v.fromArray(base,i*3).applyQuaternion(q);v.x+=2*translation.x;v.y+=2*translation.y;v.z+=2*translation.z;
+  // Dual quaternions carry a blended vertex around the joint on an arc. That
+  // keeps elbows and knees full, but at the shoulder it swings the armpit and
+  // rear deltoid outward into a padded block when the arm is raised. Where the
+  // trunk and an upper arm meet, lean toward the straight-line blend instead.
+  const first=weights[i][0],second=weights[i][1];
+  if(second&&first[0]===0&&(second[0]===2||second[0]===4)){
+   let lx=0,ly=0,lz=0;
+   for(const [bone,w] of weights[i]){const m=rigid[bone];p.fromArray(base,i*3).applyQuaternion(m.rotation).add(m.offset);lx+=p.x*w;ly+=p.y*w;lz+=p.z*w;}
+   const k=SHOULDER_LINEAR*4*first[1]*second[1];
+   v.x+=(lx-v.x)*k;v.y+=(ly-v.y)*k;v.z+=(lz-v.z)*k;
+  }
+  v.toArray(target,i*3);
   if(joints.spineFlex){
    const trunkWeight=weights[i].find(([bone])=>bone===0)?.[1]||0;
    if(trunkWeight){const u=THREE.MathUtils.clamp(((v.x-joints[0][0])*spineAxis.x+(v.y-joints[0][1])*spineAxis.y+(v.z-joints[0][2])*spineAxis.z)/spineLengthSquared,0,1);target[i*3+1]+=trunkWeight*joints.spineFlex*Math.sin(Math.PI*u);}

@@ -72,7 +72,7 @@ function Athlete({ motion, progress, mirror, measurement, profile, compact, ligh
     const prepared=prepareAthlete(measurement,profile,character);
     const {wear,scale}=prepared;
     const geometry = exerciseAvatarGeometry(wear, scale, character);
-    const surface = appearance === 'mannequin' ? mannequinMaterials() : exerciseMaterials(character,faceAtlas);
+    const surface = appearance === 'mannequin' ? mannequinMaterials(motion) : exerciseMaterials(character,faceAtlas);
     if (appearance === 'mannequin') applyMannequinColors(geometry, scale, motion);
     else if(highlight) applyAthleteHighlights(geometry, scale, motion, surface.materials);
     return { ...prepared, geometry, appearance: surface };

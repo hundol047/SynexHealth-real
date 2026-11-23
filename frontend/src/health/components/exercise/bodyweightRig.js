@@ -151,7 +151,8 @@ export function bodyweightPoseJoints(id, progress, rest) {
       toward = [side, 0, 0];
     } else if (hinge) {
       target = [joints[root][0] + side * .015 * h, joints[root][1] - (upper + lower) * .97, joints[root][2] + .015 * h];
-      toward = [0, 0, 1];
+      // Elbows soften backward; a forward pole bent the hanging arms the wrong way.
+      toward = [side * .3, 0, -1];
     } else {
       // Relaxed clasp in front of the sternum, rather than locked-out robot arms.
       const counterbalance = id === 'squat' ? .06 * bend : .015 * bend;
