@@ -1,0 +1,179 @@
+From 637a205c17322d51a8fba28fb26472ea086ad3bf Mon Sep 17 00:00:00 2001
+From: ksg136 <ksg136@users.noreply.github.com>
+Date: Mon, 23 Nov 2026 20:32:13 +0900
+Subject: [PATCH] Explain limitation and preference handling, prefer named
+ exercises, show bare feet in demos
+
+The routine rationale now states how many exercises a limitation removed and
+which preferred exercises were placed first, or that a preference matched none.
+Exercise demonstrations drop the separate shoe meshes, which never fitted the
+animated foot, and render bare feet instead.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ frontend/src/health/components/body3d/avatar.js |  5 +++--
+ .../components/exercise/ExerciseMotion3D.jsx    |  2 --
+ .../health/components/exercise/athleteModel.js  |  2 +-
+ .../components/exercise/exerciseAppearance.js   |  2 +-
+ frontend/src/shared/lib/localApi.js             | 17 ++++++++++++++---
+ frontend/src/shared/lib/localRoutinePlan.js     | 14 +++++++++++---
+ frontend/tests/LocalApi.test.js                 | 13 +++++++++++++
+ 7 files changed, 43 insertions(+), 12 deletions(-)
+
+diff --git a/frontend/src/health/components/body3d/avatar.js b/frontend/src/health/components/body3d/avatar.js
+index 4ae4af0..ef95542 100644
+--- a/frontend/src/health/components/body3d/avatar.js
++++ b/frontend/src/health/components/body3d/avatar.js
+@@ -7,9 +7,10 @@ export function personalizedVertices(measurement={},profile={}) {
+ }
+ // Original, unbranded garments share the body's topology and joint weights.
+ // Covered body faces are omitted so skin cannot poke through the opaque clothing.
+-export function sportswear(base,stature=1,gender) {
++// barefoot: exercise demonstrations show bare feet; separate shoe meshes never fit the animated foot.
++export function sportswear(base,stature=1,gender,{barefoot=false}={}) {
+  const positions=base.slice(),indices={skin:[],top:[],bottom:[],shoes:[]};
+- const materialAt=(x,y)=>y<.13?'shoes':y<.94?(gender==='male'&&y<.57?'skin':'bottom'):y<1.49&&(Math.abs(x)<.265||y>1.27)?'top':'skin';
++ const materialAt=(x,y)=>y<.13?(barefoot?'skin':'shoes'):y<.94?(gender==='male'&&y<.57?'skin':'bottom'):y<1.49&&(Math.abs(x)<.265||y>1.27)?'top':'skin';
+  const labels=[];
+  for(let i=0;i<base.length;i+=3){const x=base[i],y=base[i+1]/stature,z=base[i+2];const label=materialAt(x,y);labels.push(label);
+   if(label==='top') {positions[i]=x*1.015;positions[i+2]=z+Math.sign(z-.035)*.006;}
+diff --git a/frontend/src/health/components/exercise/ExerciseMotion3D.jsx b/frontend/src/health/components/exercise/ExerciseMotion3D.jsx
+index 1b4532a..41ee8f2 100644
+--- a/frontend/src/health/components/exercise/ExerciseMotion3D.jsx
++++ b/frontend/src/health/components/exercise/ExerciseMotion3D.jsx
+@@ -14,7 +14,6 @@ import pixieHairAtlas from '../character/assets/short03.webp';
+ import sleekHairAtlas from '../character/assets/medium-layered.webp';
+ import sleekHairNormal from '../character/assets/medium-layered-normal.webp';
+ import naturalShortHairAtlas from '../character/assets/short02.webp';
+-import Footwear from '../body3d/Footwear.jsx';
+ import { exerciseAvatarGeometry, exerciseMaterials } from './exerciseAppearance.js';
+ import ExerciseEquipment from './ExerciseEquipment.jsx';
+ import { exerciseCameraPreset } from './exerciseCamera.js';
+@@ -123,7 +122,6 @@ function Athlete({ motion, progress, mirror, measurement, profile, compact, ligh
+         renderer.domElement.dataset.exerciseVertices = String(model.geometry.attributes.position.count);
+       }}/>
+       {appearance === 'athlete' && <HeadDetail hairNormal={character.hairStyle==='sleek'?normalAtlas:null} hairAtlas={hairAtlas} base={model.headBase} scale={model.scale} rest={model.rest} joints={joints} character={character} progress={progress}/>}
+-      <Footwear anchors={shoes}/>
+     </group>
+     <ExerciseEquipment motion={motion} joints={joints} rest={model.rest} progress={progress} heightScale={model.scale}/>
+   </group>;
+diff --git a/frontend/src/health/components/exercise/athleteModel.js b/frontend/src/health/components/exercise/athleteModel.js
+index 4d32900..738486f 100644
+--- a/frontend/src/health/components/exercise/athleteModel.js
++++ b/frontend/src/health/components/exercise/athleteModel.js
+@@ -39,7 +39,7 @@ export function prepareAthlete(measurement,profile={},character){
+  const scale=morphParameters(measurement,profile).heightScale;
+  const base=characterSurface(personalizedVertices(measurement,profile),c,scale);
+  if(!bindings.has(gender))bindings.set(gender,bindSurface(personalizedVertices({height:178,weight:70,body_fat_percentage:20,skeletal_muscle_mass:32},{gender})));
+- const weights=bindings.get(gender),wear=fitExerciseClothing(sportswear(base,scale,gender),scale,c);
++ const weights=bindings.get(gender),wear=fitExerciseClothing(sportswear(base,scale,gender,{barefoot:true}),scale,c);
+  const flat=morphPositions(Float32Array.from(REST.flat()),measurement,profile),rest=REST.map((_,i)=>Array.from(flat.slice(i*3,i*3+3)));
+  const shoes=footwearAnchors(base);rest.heelContactHeights=heelContactHeights(shoes,rest);
+  rest.handGripScale=calibrateGripScale(wear.positions,weights,rest);rest.wallSupport=calibrateWallSupport(wear.positions,weights,rest);
+diff --git a/frontend/src/health/components/exercise/exerciseAppearance.js b/frontend/src/health/components/exercise/exerciseAppearance.js
+index 5fec282..f77f236 100644
+--- a/frontend/src/health/components/exercise/exerciseAppearance.js
++++ b/frontend/src/health/components/exercise/exerciseAppearance.js
+@@ -11,7 +11,7 @@ const gaussian = (x, y, cx, cy, sx, sy) => Math.exp(-(((x - cx) / sx) ** 2 + ((y
+ // rather than along a vertical plane through the world.
+ export function exerciseGarmentAt(x, y, z, original = 'skin', character) {
+   if(character){
+-    if(y<.13)return 'shoes';
++    if(y<.13)return 'skin';
+     if(y<.965&&Math.abs(x)>.32)return 'skin';
+     if(y<.965)return (character.pants==='shorts'&&y<.70)?'skin':'bottom';
+     const arm=Math.abs(x)>.185;
+diff --git a/frontend/src/shared/lib/localApi.js b/frontend/src/shared/lib/localApi.js
+index a19c8a1..1b66e26 100644
+--- a/frontend/src/shared/lib/localApi.js
++++ b/frontend/src/shared/lib/localApi.js
+@@ -1,4 +1,4 @@
+-import {balancedLocalDays,LOCAL_ROUTINE_VERSION} from './localRoutinePlan.js';
++import {balancedLocalDays,LOCAL_ROUTINE_VERSION,environmentCatalog,preferenceTerms,matchesPreference} from './localRoutinePlan.js';
+ import catalog from './localCatalog.json';
+ import schools from './localSchools.json';
+ import {loadLocalDocument,saveLocalDocument} from './offline.js';
+@@ -51,6 +51,17 @@ function body(s){
+  const map=new Map((m.segments||[]).map(x=>[x.segment,x])),old=new Map((prev?.segments||[]).map(x=>[x.segment,x]));
+  return {measurement:m,previous_measurement:prev,current_measurement_id:m.id,previous_measurement_id:prev?.id||null,body_profile:{gender:s.profile.gender,height_cm:m.height||s.profile.height,birth_date:s.profile.birth_date||null,model_type:'illustrative_human',personal_scan:false},average_comparison:{groups:[],selected_group_id:null,selection_mode:'auto'},reference_comparison:Object.fromEntries(segments.map(id=>[id,{status:map.has(id)?'no_reference':'no_measurement'}])),top_level_deltas:Object.fromEntries(['weight','skeletal_muscle_mass','body_fat_percentage','body_fat_mass'].map(k=>[k+'_delta',delta(m[k],prev?.[k])])),left_right_balance:Object.fromEntries([['arm','LEFT_ARM','RIGHT_ARM'],['leg','LEFT_LEG','RIGHT_LEG']].map(([part,l,r])=>{const a=map.get(l)?.lean_mass_kg,b=map.get(r)?.lean_mass_kg;return [part,{left_kg:a??null,right_kg:b??null,diff_percent:a!=null&&b>0?Number(((a-b)/b*100).toFixed(1)):null}];})),segment_deltas:segments.map(id=>({segment:id,lean_mass_delta_kg:delta(map.get(id)?.lean_mass_kg,old.get(id)?.lean_mass_kg),fat_mass_delta_kg:delta(map.get(id)?.fat_mass_kg,old.get(id)?.fat_mass_kg)}))};
+ }
++// Plain statements of how the user's limitations and preferences changed this plan.
++function conditionRationale(p,avoid,exercises){
++ const own=list=>(list||[]).map(x=>String(x).trim()).filter(x=>x&&x!=='없음'&&x.toLowerCase()!=='none');
++ const limits=own(p.limitations),likes=own(p.preferences),terms=preferenceTerms(likes);
++ const excluded=environmentCatalog(p).filter(x=>(x.avoid||[]).some(k=>avoid.includes(k))).length;
++ const chosen=[...new Set(exercises.filter(e=>matchesPreference({name:e.exercise_name,id:e.motion_id},terms)).map(e=>e.exercise_name))];
++ return [
++  limits.length?`제약사항(${limits.join(', ')}): 해당 부위에 부담을 줄 수 있는 동작 ${excluded}개를 후보에서 빼고 구성했습니다.`:'제약사항: 입력 없음 · 장소·장비에 맞는 모든 동작을 후보로 두었습니다.',
++  !likes.length?'선호사항: 입력 없음':chosen.length?`선호사항(${likes.join(', ')}): 같은 동작 유형 안에서 ${chosen.join(', ')}을(를) 우선 배정했습니다.`:`선호사항(${likes.join(', ')}): 이름이 일치하는 동작이 없거나 장소·제약사항으로 제외되어 반영하지 못했습니다. 동작 이름(예: 스쿼트, 브리지)으로 적으면 우선 배정합니다.`,
++ ];
++}
+ export function generateLocalRoutine(s){
+  // Without a measurement we still build a conservative starter plan so a new user is never stuck.
+  const p=s.exercise,m=latest(s)||null,starter=!m,recent=s.workouts.filter(w=>Date.now()-Date.parse(w.date)<7*86400000);
+@@ -62,8 +73,8 @@ export function generateLocalRoutine(s){
+  const gentle=starter||p.experience_level==='BEGINNER'||(bmi!=null&&bmi<18.5)||muscleDown||recent.some(w=>(w.rpe??0)>=8);
+  const cautious=(bmi!=null&&bmi<18.5)||muscleDown||recent.some(w=>(w.rpe??0)>=8);
+  const fatGoal=p.goal==='FAT_MANAGEMENT'||['fat_loss','weight_loss'].includes(s.goal?.strategy);
+- const {exercises,day_minutes,day_timing,schedule}=balancedLocalDays(p,{gentle,cautious,fatGoal,avoid});
+- return {id:secureUUID(),user_id:LOCAL_ACCOUNT,created_at:now(),based_on_measurement_id:m?.id??null,starter,goal:({GENERAL_HEALTH:'기본 체력 관리',GENERAL_FITNESS:'전반적인 체력 향상',MUSCLE_GAIN:'근력·근육량 향상',FAT_MANAGEMENT:'체지방 관리',BALANCE:'균형 있는 움직임'})[p.goal]||'나의 운동 계획',summary:'이 폰에서 생성한 기본 운동 계획입니다. 여러 근력 동작을 먼저 배정하고 남는 시간에 유산소를 더합니다. 준비운동·실제 시범·휴식을 합산한 시간이며, 근력 세션 사이에는 회복일을 두세요.',duration_weeks:4,days_per_week:p.days_per_week,exercises,day_minutes,day_timing,generated_by:'local_rules',algorithm_version:LOCAL_ROUTINE_VERSION,needs_review:false,rationale:[`운동 경험: ${{BEGINNER:'처음 시작',INTERMEDIATE:'꾸준히 운동 중',ADVANCED:'운동 경험이 많음'}[p.experience_level]} · ${{home:'집',gym:'헬스장',outdoor:'실외'}[p.exercise_location]}`,m?`측정 체중 ${m.weight}kg · 골격근량 ${m.skeletal_muscle_mass}kg`:'체성분 측정값이 없어 낮은 부담으로 시작합니다.',muscleDown?'이전보다 낮은 골격근량 기록이 있어 부담을 낮췄습니다. 측정 차이만으로 근력 저하를 진단하지 않습니다.':'근육량만으로 실제 근력·적정 중량을 추정하지 않습니다.'],notices:['개인용 기본 규칙이며 서버의 전체 추천 알고리즘과 다릅니다.','부위별 측정값과 실제 인구 평균은 만들거나 추정하지 않습니다.','통증·어지럼·흉통이 있으면 즉시 중단하세요.',...(avoid.length?['제약 부위에 부담을 줄 수 있는 동작을 제외했습니다. 제외되지 않은 동작도 통증이 있으면 중단하세요.']:[])],sources:[{title:'Fitbod · 목표·장비·회복을 고려한 운동 구성',url:'https://fitbod.me/'},{title:'Strong · 사용자 조절 타이머와 운동 기록',url:'https://www.strong.app/'},{title:'Nike Training Club · 단계별 프로그램',url:'https://www.nike.com/ntc-app'}],input_snapshot:{weight_kg:m?.weight??null,muscle_kg:m?.skeletal_muscle_mass??null,body_fat_percent:m?.body_fat_percentage??null,profile:structuredClone(p)},schedule,progression:gentle?'적은 세트부터 시작하고 통증과 수행 부담을 기록하세요.':'실제 수행 기록을 확인한 뒤 재생성하세요. 중량은 자동으로 올리지 않습니다.'};
++ const {exercises,day_minutes,day_timing,schedule}=balancedLocalDays(p,{gentle,cautious,fatGoal,avoid,preferences:p.preferences});
++ return {id:secureUUID(),user_id:LOCAL_ACCOUNT,created_at:now(),based_on_measurement_id:m?.id??null,starter,goal:({GENERAL_HEALTH:'기본 체력 관리',GENERAL_FITNESS:'전반적인 체력 향상',MUSCLE_GAIN:'근력·근육량 향상',FAT_MANAGEMENT:'체지방 관리',BALANCE:'균형 있는 움직임'})[p.goal]||'나의 운동 계획',summary:'이 폰에서 생성한 기본 운동 계획입니다. 여러 근력 동작을 먼저 배정하고 남는 시간에 유산소를 더합니다. 준비운동·실제 시범·휴식을 합산한 시간이며, 근력 세션 사이에는 회복일을 두세요.',duration_weeks:4,days_per_week:p.days_per_week,exercises,day_minutes,day_timing,generated_by:'local_rules',algorithm_version:LOCAL_ROUTINE_VERSION,needs_review:false,rationale:[`운동 경험: ${{BEGINNER:'처음 시작',INTERMEDIATE:'꾸준히 운동 중',ADVANCED:'운동 경험이 많음'}[p.experience_level]} · ${{home:'집',gym:'헬스장',outdoor:'실외'}[p.exercise_location]}`,m?`측정 체중 ${m.weight}kg · 골격근량 ${m.skeletal_muscle_mass}kg`:'체성분 측정값이 없어 낮은 부담으로 시작합니다.',muscleDown?'이전보다 낮은 골격근량 기록이 있어 부담을 낮췄습니다. 측정 차이만으로 근력 저하를 진단하지 않습니다.':'근육량만으로 실제 근력·적정 중량을 추정하지 않습니다.',...conditionRationale(p,avoid,exercises)],notices:['개인용 기본 규칙이며 서버의 전체 추천 알고리즘과 다릅니다.','부위별 측정값과 실제 인구 평균은 만들거나 추정하지 않습니다.','통증·어지럼·흉통이 있으면 즉시 중단하세요.',...(avoid.length?['제약 부위에 부담을 줄 수 있는 동작을 제외했습니다. 제외되지 않은 동작도 통증이 있으면 중단하세요.']:[])],sources:[{title:'Fitbod · 목표·장비·회복을 고려한 운동 구성',url:'https://fitbod.me/'},{title:'Strong · 사용자 조절 타이머와 운동 기록',url:'https://www.strong.app/'},{title:'Nike Training Club · 단계별 프로그램',url:'https://www.nike.com/ntc-app'}],input_snapshot:{weight_kg:m?.weight??null,muscle_kg:m?.skeletal_muscle_mass??null,body_fat_percent:m?.body_fat_percentage??null,profile:structuredClone(p)},schedule,progression:gentle?'적은 세트부터 시작하고 통증과 수행 부담을 기록하세요.':'실제 수행 기록을 확인한 뒤 재생성하세요. 중량은 자동으로 올리지 않습니다.'};
+ }
+ let chain=Promise.resolve();
+ function restoredDocument(backup){
+diff --git a/frontend/src/shared/lib/localRoutinePlan.js b/frontend/src/shared/lib/localRoutinePlan.js
+index c7ab0ec..1e7f6ae 100644
+--- a/frontend/src/shared/lib/localRoutinePlan.js
++++ b/frontend/src/shared/lib/localRoutinePlan.js
+@@ -6,15 +6,23 @@ const patterns=['squat','push','pull','hinge','core'];
+ const preferred=['sit_stand','wall_push','scapular','bridge','dead_bug','walk'];
+ const weekdays={1:[1],2:[1,4],3:[1,3,5],4:[1,2,4,6],5:[1,2,3,5,6],6:[1,2,3,4,5,6],7:[1,2,3,4,5,6,7]};
+ const strengthSlots={1:[0],2:[0,1],3:[0,1,2],4:[0,2,3],5:[0,2,4],6:[0,2,4],7:[0,2,4]};
++const compact=t=>String(t).toLowerCase().replace(/\s+/g,'');
++// Preferences name exercises (e.g. "스쿼트", "브리지"); free-form goals that name no exercise are reported as unmatched.
++export const preferenceTerms=list=>(list||[]).map(compact).filter(t=>t.length>=2&&t!=='없음'&&t!=='none');
++export const matchesPreference=(x,terms)=>terms.some(t=>{const n=compact(x.name);return n.includes(t)||t.includes(n)||t===x.id;});
++// Exercises the place, equipment and mode allow, before limitations or preferences.
++export const environmentCatalog=profile=>catalog.filter(x=>x.auto_recommend!==false&&x.difficulty!=='advanced'&&x.locations.includes(profile.exercise_location)&&x.equipment.every(k=>profile.available_equipment.includes(k))&&(profile.training_mode!=='bodyweight'||!x.equipment.length));
+ const seconds=exercises=>Math.ceil(buildTempoPlan(exercises).reduce((sum,s)=>sum+s.durationMs,0)/1000);
+-export function balancedLocalDays(profile,{gentle=false,cautious=false,fatGoal=false,avoid=[]}={}){
+- const allowed=catalog.filter(x=>x.auto_recommend!==false&&x.difficulty!=='advanced'&&x.locations.includes(profile.exercise_location)&&x.equipment.every(k=>profile.available_equipment.includes(k))&&(profile.training_mode!=='bodyweight'||!x.equipment.length)&&!(x.avoid||[]).some(k=>avoid.includes(k)));
++export function balancedLocalDays(profile,{gentle=false,cautious=false,fatGoal=false,avoid=[],preferences=[]}={}){
++ const terms=preferenceTerms(preferences),allowed=environmentCatalog(profile).filter(x=>!(x.avoid||[]).some(k=>avoid.includes(k)));
+  const pick=(pattern,variation=0)=>{
+   let candidates=allowed.filter(x=>x.pattern===pattern);
+   if(gentle&&candidates.some(x=>x.easy))candidates=candidates.filter(x=>x.easy);
+   const score=x=>(profile.training_mode==='equipment'&&x.equipment.length?30:0)+(preferred.includes(x.id)?3:0);
+   candidates.sort((a,b)=>score(b)-score(a));
+-  const best=candidates.filter(x=>Boolean(x.equipment.length)===Boolean(candidates[0]?.equipment.length));
++  // A preferred exercise leads its movement pattern; safety, place and the beginner filter still apply first.
++  const liked=candidates.filter(x=>matchesPreference(x,terms));
++  const best=liked.length?liked:candidates.filter(x=>Boolean(x.equipment.length)===Boolean(candidates[0]?.equipment.length));
+   return best.length?best[variation%Math.min(best.length,2)]:undefined;
+  };
+  const exercise=(x,day)=>({exercise_id:`d${day}-${x.id}`,motion_id:x.motion_id||x.id,exercise_name:x.name,day_number:day,target_regions:x.regions,training_type:x.training_type,equipment:x.equipment,instructions:x.instructions,cautions:x.cautions,sets:1,reps:'6',dose_type:x.dose_type,hold_seconds:x.dose_type==='hold'?20:undefined,duration_seconds:x.dose_type==='duration'?60:undefined,intensity:'자세를 유지할 수 있는 부담 · 통증 없는 범위',reason:'하체·밀기·등·엉덩이·몸통을 골고루 배정하고 실제 시범·휴식 시간을 합산했습니다.',rest_seconds:recommendedRest({motion_id:x.motion_id||x.id,equipment:x.equipment,dose_type:x.dose_type}).seconds,transition_seconds:x.equipment.length?30:20});
+diff --git a/frontend/tests/LocalApi.test.js b/frontend/tests/LocalApi.test.js
+index 93b4d37..5f91b00 100644
+--- a/frontend/tests/LocalApi.test.js
++++ b/frontend/tests/LocalApi.test.js
+@@ -83,3 +83,16 @@ it('builds a routine around known limitations like the server and blocks only ou
+   await expect(localApi('/api/exercise-routines/generate',{})).rejects.toMatchObject({status:409});
+  }
+ });
++it('explains how limitations and preferences shaped the plan and prefers named exercises',async()=>{
++ await localApi('/api/body-composition',measurement);
++ let r=await localApi('/api/exercise-routines/generate',{});
++ expect(r.rationale).toContain('제약사항: 입력 없음 · 장소·장비에 맞는 모든 동작을 후보로 두었습니다.');expect(r.rationale).toContain('선호사항: 입력 없음');
++ await localApi('/api/exercise-profile',{limitations:['무릎 통증'],preferences:['브리지']},{method:'PUT'});
++ r=await localApi('/api/exercise-routines/generate',{});
++ expect(r.rationale.find(t=>t.startsWith('제약사항(무릎 통증)'))).toMatch(/동작 \d+개를 후보에서 빼고/);
++ expect(r.rationale.find(t=>t.startsWith('선호사항(브리지)'))).toContain('글루트 브리지');
++ expect(r.exercises.some(e=>e.exercise_name==='글루트 브리지')).toBe(true);
++ await localApi('/api/exercise-profile',{limitations:[],preferences:['하체 균형 개선']},{method:'PUT'});
++ r=await localApi('/api/exercise-routines/generate',{});
++ expect(r.rationale.find(t=>t.startsWith('선호사항(하체 균형 개선)'))).toContain('반영하지 못했습니다');
++});
+-- 
+2.43.0
+

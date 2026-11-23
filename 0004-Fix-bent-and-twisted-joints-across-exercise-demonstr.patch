@@ -1,0 +1,513 @@
+From 12f24c09a1a6db7a2a47a8aa403ec551c6a53938 Mon Sep 17 00:00:00 2001
+From: ksg <sisungaa851@gmail.com>
+Date: Sun, 1 Nov 2026 00:21:37 +0900
+Subject: [PATCH] Fix bent and twisted joints across exercise demonstrations
+
+- Point solved elbows backwards so walking and hanging arms no longer
+  hyperextend; blend stretch forearms in the upper-arm frame.
+- Rest prone, kneeling and child-pose feet on the instep instead of a
+  180-degree yaw that twisted the ankle.
+- Use overhand grips for barbell lifts, presses and RDLs, and rotate the
+  pressing humerus into the elbow's flexion plane so the skin no longer
+  crumples at the elbow.
+- Square the raised single-bridge foot, flex side-plank knees backwards,
+  rest seated palms on the thighs and lay the clamshell forearm on the mat.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../components/exercise/bodyweightRig.js      |  3 +-
+ .../exercise/equipmentCatalogRig.js           | 11 +++-
+ .../components/exercise/floorCatalogRig.js    | 40 ++++++++----
+ .../src/health/components/exercise/rig.js     | 25 +++++++-
+ .../components/exercise/standingCatalogRig.js | 27 ++++++--
+ .../health/components/exercise/stretchRig.js  | 17 +++--
+ frontend/tests/AnkleTwist.test.js             | 25 ++++++++
+ frontend/tests/ElbowHinge.test.js             | 46 ++++++++++++++
+ frontend/tests/JointSeams.test.js             | 63 +++++++++++++++++++
+ 9 files changed, 230 insertions(+), 27 deletions(-)
+ create mode 100644 frontend/tests/AnkleTwist.test.js
+ create mode 100644 frontend/tests/ElbowHinge.test.js
+ create mode 100644 frontend/tests/JointSeams.test.js
+
+diff --git a/frontend/src/health/components/exercise/bodyweightRig.js b/frontend/src/health/components/exercise/bodyweightRig.js
+index 3b16ae7..92d7d33 100644
+--- a/frontend/src/health/components/exercise/bodyweightRig.js
++++ b/frontend/src/health/components/exercise/bodyweightRig.js
+@@ -151,7 +151,8 @@ export function bodyweightPoseJoints(id, progress, rest) {
+       toward = [side, 0, 0];
+     } else if (hinge) {
+       target = [joints[root][0] + side * .015 * h, joints[root][1] - (upper + lower) * .97, joints[root][2] + .015 * h];
+-      toward = [0, 0, 1];
++      // Hanging elbows point back toward the hips; a forward hint locked them past straight.
++      toward = [side * .2, 0, -1];
+     } else {
+       // Relaxed clasp in front of the sternum, rather than locked-out robot arms.
+       const counterbalance = id === 'squat' ? .06 * bend : .015 * bend;
+diff --git a/frontend/src/health/components/exercise/equipmentCatalogRig.js b/frontend/src/health/components/exercise/equipmentCatalogRig.js
+index 0be8534..cef3f85 100644
+--- a/frontend/src/health/components/exercise/equipmentCatalogRig.js
++++ b/frontend/src/health/components/exercise/equipmentCatalogRig.js
+@@ -24,6 +24,7 @@ const average = (a, b) => a.map((value, i) => (value + b[i]) / 2);
+ 
+ const solveLimb = solveTwoBone;
+ 
++const HINGED_ARM_IDS = new Set(['shoulder_press', 'dumbbell_bench_press', 'dumbbell_floor_press', 'barbell_bench_press', 'machine_chest_press', 'lat_pulldown']);
+ export function equipmentCatalogPose(id, progress, rest) {
+   if (!EQUIPMENT_CATALOG_IDS.has(id)) return null;
+   const t = Number.isFinite(progress) ? THREE.MathUtils.clamp(progress, 0, 1) : 0;
+@@ -95,7 +96,7 @@ export function equipmentCatalogPose(id, progress, rest) {
+       const side = i === 0 ? 1 : -1, root = arm[i][0];
+       if (id === 'goblet_squat') setArm(i, [side * .215 * h, joints[1][1] - .135 * h, joints[1][2] + .17 * h], [side * .5, -1, .1]);
+       else if (id === 'barbell_squat') setArm(i, [side * .32 * h, joints[1][1] - .08 * h, joints[1][2] - .15 * h], [side, -1, -.3]);
+-      else setArm(i, [side * (id === 'barbell_rdl' ? .25 : .22) * h, joints[root][1] - (length(root, root + 1) + length(root + 1, root + 2)) * .975, joints[root][2] + .035 * h], [0, 0, 1]);
++      else setArm(i, [side * (id === 'barbell_rdl' ? .25 : .22) * h, joints[root][1] - (length(root, root + 1) + length(root + 1, root + 2)) * .975, joints[root][2] + .035 * h], [side * .2, 0, -1]);
+     }
+     if (id === 'goblet_squat') data.grip = 'goblet';
+   } else if (id === 'dumbbell_split_squat') {
+@@ -130,7 +131,7 @@ export function equipmentCatalogPose(id, progress, rest) {
+     relaxedArms();
+     // Hands rest on the side supports; they do not dangle through the seat.
+     if (['leg_extension', 'seated_leg_curl', 'machine_hip_abduction'].includes(id)) {
+-      arm.forEach(([root], i) => setArm(i, [joints[root][0] + (i === 0 ? .025 : -.025) * h, joints[root][1] - (length(root, root + 1) + length(root + 1, root + 2)) * .975, .035 * h], [i === 0 ? 1 : -1, 0, .3], [0, 0, 1]));
++      arm.forEach(([root], i) => setArm(i, [joints[root][0] + (i === 0 ? .025 : -.025) * h, joints[root][1] - (length(root, root + 1) + length(root + 1, root + 2)) * .975, .035 * h], [i === 0 ? 1 : -1, 0, -.3], [0, 0, 1]));
+     }
+     if (id === 'leg_extension' || id === 'seated_leg_curl') {
+       const theta = id === 'leg_extension' ? 1.38 * e : 1.18 - 1.50 * e;
+@@ -264,6 +265,10 @@ export function equipmentCatalogPose(id, progress, rest) {
+     }
+   }
+   if (!data.gripAxes) data.gripAxes = [[1, 0, 0], [1, 0, 0]];
++  // The back of the hand faces gripAxis x forearm. Bars, presses and RDLs use
++  // an overhand grip (palms forward or toward the feet); +x reversed the palm,
++  // turning each forearm ~180° at the elbow and bending the visible wrist.
++  if (id.startsWith('barbell_') || ['dumbbell_rdl', 'shoulder_press', 'dumbbell_bench_press', 'dumbbell_floor_press'].includes(id)) data.gripAxes = [[-1, 0, 0], [-1, 0, 0]];
+   if (id === 'hammer_curl') data.gripAxes[1] = data.gripAxes[0].map(value => -value);
+   if (['machine_chest_press', 'machine_row', 'cable_face_pull', 'goblet_squat', 'elliptical'].includes(id)) data.gripAxes = [[0, 1, 0], [0, -1, 0]];
+   if (['leg_press', 'leg_extension', 'seated_leg_curl', 'machine_hip_abduction'].includes(id)) {
+@@ -320,5 +325,7 @@ export function equipmentCatalogPose(id, progress, rest) {
+   });
+   if (id.startsWith('barbell_') || id === 'lat_pulldown') data.bar = data.handles.map(point => point.slice());
+   joints.equipment = data;
++  // Pressing and pulling arms flex in an externally rotated humerus plane.
++  if (HINGED_ARM_IDS.has(id)) joints.hingeArms = true;
+   return joints;
+ }
+diff --git a/frontend/src/health/components/exercise/floorCatalogRig.js b/frontend/src/health/components/exercise/floorCatalogRig.js
+index 2dde8c7..91c1e56 100644
+--- a/frontend/src/health/components/exercise/floorCatalogRig.js
++++ b/frontend/src/health/components/exercise/floorCatalogRig.js
+@@ -12,7 +12,6 @@ const up = new THREE.Vector3(0, 1, 0);
+ const armIndices = [[3, 4, 5], [6, 7, 8]];
+ const legIndices = [[9, 10, 11], [12, 13, 14]];
+ const pitch = radians => new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), radians);
+-const backwardFoot = new THREE.Quaternion().setFromAxisAngle(up, Math.PI);
+ const length = segmentLength;
+ 
+ function floorFoot(joints, rest, side, rotation = new THREE.Quaternion()) {
+@@ -22,6 +21,16 @@ function floorFoot(joints, rest, side, rotation = new THREE.Quaternion()) {
+   joints.boneRotations[side === 0 ? 10 : 11] = rotation.toArray();
+ }
+ 
++// A face-down or kneeling foot rests on its instep: toes continue along the
++// shin, sole up. Yawing a planted foot 180° instead kept the sole down and
++// twisted the ankle half a turn about the shin.
++function instepFoot(joints, rest, side, tilt = .45) {
++  const [knee, ankle] = side === 0 ? [10, 11] : [13, 14];
++  const front = vector(joints[ankle]).sub(vector(joints[knee])).normalize().add(new THREE.Vector3(0, -tilt, 0)).normalize();
++  const dorsum = new THREE.Vector3(0, -1, 0).addScaledVector(front, front.y).normalize();
++  floorFoot(joints, rest, side, orientation(dorsum.toArray(), front.toArray()));
++}
++
+ function orientLimbs(joints, rest, frame, includeHands = false) {
+   const bones = [[3, 4], [4, 5], [6, 7], [7, 8], [9, 10], [10, 11], [12, 13], [13, 14]];
+   joints.boneRotations ||= {};
+@@ -102,7 +111,7 @@ function quadrupedFrame(rest, h) {
+     joints[knee] = vector(joints[hip]).add(new THREE.Vector3(0, -length(rest, hip, knee), 0)).toArray();
+     const shin = length(rest, knee, ankle), lift = .038 * h;
+     joints[ankle] = vector(joints[knee]).add(new THREE.Vector3(0, lift, -Math.sqrt(shin * shin - lift * lift))).toArray();
+-    floorFoot(joints, rest, side, backwardFoot);
++    instepFoot(joints, rest, side);
+   }
+   for (const [side, [shoulder]] of armIndices.entries()) {
+     const sign = side === 0 ? 1 : -1;
+@@ -136,7 +145,7 @@ function kneePushup(rest, t, h) {
+     joints[knee] = [rest[hip][0], kneeY, kneeZ];
+     const lower = length(rest, knee, ankle), lift = .205 * h;
+     joints[ankle] = vector(joints[knee]).add(new THREE.Vector3(0, lift, -Math.sqrt(lower * lower - lift * lift))).toArray();
+-    floorFoot(joints, rest, side, backwardFoot);
++    instepFoot(joints, rest, side);
+   }
+   for (const [side] of armIndices.entries()) {
+     const sign = side === 0 ? 1 : -1;
+@@ -160,7 +169,7 @@ function birdDog(rest, t, h) {
+   const planted = vector(joints[ankle]);
+   const extended = vector(joints[hip]).add(new THREE.Vector3(0, 0, -legReach));
+   solveLimb(joints, rest, activeLeg, 'leg', planted.lerp(extended, amount).toArray(), [0, -1, 0]);
+-  floorFoot(joints, rest, activeLeg, backwardFoot);
++  instepFoot(joints, rest, activeLeg);
+   return joints;
+ }
+ 
+@@ -212,7 +221,9 @@ function singleBridge(rest, t, h) {
+   joints[knee] = vector(joints[hip]).addScaledVector(axis, length(rest, hip, knee)).toArray();
+   const shinAxis = axis.clone().applyAxisAngle(new THREE.Vector3(1, 0, 0), -.07);
+   joints[ankle] = vector(joints[knee]).addScaledVector(shinAxis, length(rest, knee, ankle)).toArray();
+-  floorFoot(joints, rest, 0, pitch(-.40));
++  // The raised foot stays square to its shin with a gentle point; a foot held
++  // level with the floor folded the ankle ~65° past neutral under the lifted leg.
++  floorFoot(joints, rest, 0, new THREE.Quaternion().setFromUnitVectors(vector(rest[11]).sub(vector(rest[10])).normalize(), shinAxis).multiply(pitch(.30)));
+   return joints;
+ }
+ 
+@@ -230,9 +241,12 @@ function kneeSidePlank(rest, h) {
+     const kneeHeight = (.082 + (side === 0 ? .075 : 0)) * h;
+     const drop = THREE.MathUtils.clamp(joints[hip][1] - kneeHeight, -thigh * .97, thigh * .97);
+     joints[knee] = vector(joints[hip]).add(new THREE.Vector3(0, -drop, -Math.sqrt(thigh * thigh - drop * drop))).toArray();
+-    const shin = new THREE.Vector3(.945, .18, -.27).normalize();
++    // Knees flex backwards: the shins trail behind the body (-x is posterior
++    // here). Pointing them forward bent each knee the wrong way.
++    const shin = new THREE.Vector3(-.945, .18, -.27).normalize();
+     joints[ankle] = vector(joints[knee]).addScaledVector(shin, length(rest, knee, ankle)).toArray();
+-    floorFoot(joints, rest, side, rotation);
++    const restShin = vector(rest[ankle]).sub(vector(rest[knee])).normalize().applyQuaternion(rotation);
++    floorFoot(joints, rest, side, new THREE.Quaternion().setFromUnitVectors(restShin, shin).multiply(rotation).multiply(pitch(.35)));
+   }
+   // The bottom elbow is under the shoulder; the entire forearm is on the mat.
+   joints[7] = vector(joints[6]).add(new THREE.Vector3(0, -length(rest, 6, 7), 0)).toArray();
+@@ -258,10 +272,12 @@ function clamshell(rest, t, h) {
+     solveLimb(joints, rest, side, 'leg', target, pole);
+     floorFoot(joints, rest, side, orientation(axis.toArray(), [1, 0, 0]));
+   }
+-  // A folded lower arm and a small pad support the resting head/neck.
+-  solveLimb(joints, rest, 1, 'arm', [.035 * h, .092 * h, joints[1][2] + .21 * h], [1, .25, -.1]);
+-  setHand(joints, rest, 1, [0, .1, 1]);
+-  solveLimb(joints, rest, 0, 'arm', [.07 * h, .23 * h, joints[1][2] - .18 * h], [1, 0, 0]);
++  // A small pad supports the head. The lower forearm rests on the mat in front
++  // of the face; folding it under the pad pushed the hand over the scalp.
++  solveLimb(joints, rest, 1, 'arm', [joints[6][0] + .24 * h, .045 * h, joints[6][2] + .13 * h], [1, 0, -1]);
++  setHand(joints, rest, 1, [.15, -.05, 1]);
++  // The top arm lies along the flank, its elbow pointing back and up.
++  solveLimb(joints, rest, 0, 'arm', [.07 * h, .23 * h, joints[1][2] - .18 * h], [-1, .6, 0]);
+   setHand(joints, rest, 0, [0, -.3, -.95]);
+   orientLimbs(joints, rest, orientation(axis.toArray(), [1, 0, 0]), true);
+   joints.equipment = { kind: 'mat', neckSupport: { position: [0, .037 * h, joints[2][2] + .035 * h], size: [.26 * h, .075 * h, .22 * h] } };
+@@ -277,7 +293,7 @@ function proneY(rest, t, h) {
+     const direction = new THREE.Vector3(0, -.04, -Math.sqrt(1 - .04 ** 2));
+     joints[knee] = vector(joints[hip]).addScaledVector(direction, length(rest, hip, knee)).toArray();
+     joints[ankle] = vector(joints[knee]).addScaledVector(direction, length(rest, knee, ankle)).toArray();
+-    floorFoot(joints, rest, side, backwardFoot);
++    instepFoot(joints, rest, side);
+   }
+   const lift = repetition(t);
+   for (const [side, [shoulder, elbow, wrist]] of armIndices.entries()) {
+diff --git a/frontend/src/health/components/exercise/rig.js b/frontend/src/health/components/exercise/rig.js
+index e50ce1d..87fa614 100644
+--- a/frontend/src/health/components/exercise/rig.js
++++ b/frontend/src/health/components/exercise/rig.js
+@@ -88,12 +88,12 @@ export function calibratePalmRoll(base,weights,rest=REST){
+ }
+ // One rotation rule for the mesh and audits. A hand's pronation must continue
+ // through its forearm, not abruptly twist at the wrist blend seam.
+-export function rigRotation(joints,index,rest=REST){
++function segmentRotation(joints,index,rest){
+  const [a,b]=BONES[index],authored=joints.boneRotations?.[index];
+  if(!authored&&(index===3||index===5)){
+   const side=index===3?0:1,hand=12+side;
+   if(joints.boneRotations?.[hand]||joints.handRoll?.[side]){
+-   const palm=rigRotation(joints,hand,rest);
++   const palm=segmentRotation(joints,hand,rest);
+    const from=vec(rest[b]).sub(vec(rest[a])).normalize().applyQuaternion(palm);
+    const to=vec(joints[b]).sub(vec(joints[a])).normalize();
+    return new THREE.Quaternion().setFromUnitVectors(from,to).multiply(palm);
+@@ -104,6 +104,27 @@ export function rigRotation(joints,index,rest=REST){
+  if(roll)rotation.premultiply(new THREE.Quaternion().setFromAxisAngle(vec(joints[b]).sub(vec(joints[a])).normalize(),roll));
+  return rotation;
+ }
++// Presses and pulldowns hold the upper arm out with a bent elbow: the humerus
++// is rotated so the elbow flexes in that plane. A shortest-arc upper arm kept
++// the hanging twist instead and folded the elbow skin sideways into dark
++// creases. Turn the upper arm about its own axis until the forearm lies in its
++// rest flexion plane; nearly straight arms keep the shortest arc.
++function hingeUpperArm(joints,index,rest,rotation){
++ const [a,b]=BONES[index],wrist=index===2?5:8,axis=vec(rest[b]).sub(vec(rest[a])).normalize();
++ const local=vec(joints[wrist]).sub(vec(joints[b])).normalize().applyQuaternion(rotation.clone().invert());
++ const plane=v=>v.addScaledVector(axis,-v.dot(axis));
++ const reference=plane(vec(rest[wrist]).sub(vec(rest[b])).normalize()),target=plane(local);
++ if(reference.lengthSq()<1e-8||target.lengthSq()<1e-8)return rotation;
++ reference.normalize();target.normalize();
++ const angle=Math.atan2(new THREE.Vector3().crossVectors(reference,target).dot(axis),reference.dot(target));
++ const bend=axis.angleTo(local);
++ return rotation.multiply(new THREE.Quaternion().setFromAxisAngle(axis,angle*THREE.MathUtils.smoothstep(bend,.25,.6)));
++}
++export function rigRotation(joints,index,rest=REST){
++ const rotation=segmentRotation(joints,index,rest);
++ if((index===2||index===4)&&joints.hingeArms&&!joints.boneRotations?.[index])return hingeUpperArm(joints,index,rest,rotation);
++ return rotation;
++}
+ // Normalized dual-quaternion blending preserves rigid volume around bent joints.
+ // Original implementation of the published algorithm (Kavan et al., 2008).
+ export function deformSurface(base,weights,joints,target,rest=REST,ground=true){
+diff --git a/frontend/src/health/components/exercise/standingCatalogRig.js b/frontend/src/health/components/exercise/standingCatalogRig.js
+index def070d..dc3dc8e 100644
+--- a/frontend/src/health/components/exercise/standingCatalogRig.js
++++ b/frontend/src/health/components/exercise/standingCatalogRig.js
+@@ -252,7 +252,10 @@ export function standingCatalogPose(id, progress, rest) {
+   for (const [i, [root, elbow, wrist, finger]] of [[3, 4, 5, 17], [6, 7, 8, 18]].entries()) {
+     const side = i === 0 ? 1 : -1, upper = length(root, elbow), lower = length(elbow, wrist);
+     let target = vec(joints[root]).add(new THREE.Vector3(side * .025 * h, -(upper + lower) * .96, .035 * h).applyQuaternion(rotation)).toArray();
+-    let toward = [side * .25, 0, 1], hand = null;
++    // solveLimb displaces the elbow toward this hint. An elbow can only fold
++    // its forearm forward, so the joint itself must point back (and slightly
++    // out); a forward hint hyperextended hanging and swinging arms.
++    let toward = [side * .25, 0, -1], hand = null, restingPalm = false;
+     if (id === 'wall_push' || id === 'close_wall_push') {
+       target = [side * (id === 'close_wall_push' ? .11 : .22) * h, 1.33 * h, .57 * h];
+       toward = [side * (id === 'close_wall_push' ? .16 : .45), -1, -.2];
+@@ -267,6 +270,7 @@ export function standingCatalogPose(id, progress, rest) {
+       hand = [0, 1, 0];
+     } else if (['calf', 'single_calf', 'split_squat', 'hip_abduction'].includes(id) && i === 0) {
+       target = [.40 * h, 1.19 * h, .23 * h];
++      toward = [.45, -1, -.3];
+       hand = [1, 0, 0];
+     } else if (id === 'scapular') {
+       const elbowDirection = normalized([side * .08, -1, -.28 * bend]).applyQuaternion(rotation);
+@@ -292,8 +296,18 @@ export function standingCatalogPose(id, progress, rest) {
+       target = [hip.x + side * .11 * h, joints[root][1] - .17 * h, joints[root][2] + .22 * h];
+       toward = [side * .5, -1, -.2];
+       hand = [-side * .7, 0, .7];
+-    } else if (seated || id === 'wall_sit') {
+-      target = [side * .20 * h, (.75 - (id === 'hamstring_stretch' ? .10 * bend : 0)) * h, (.23 + (id === 'hamstring_stretch' ? .13 * bend : 0)) * h];
++    } else if (seated) {
++      // Palms rest on the thighs. Hands held 23 cm above the legs drooped at
++      // the wrist; the stretch slides them toward the knee instead.
++      const [hipJoint, kneeJoint] = i === 0 ? [9, 10] : [12, 13];
++      const thigh = vec(joints[kneeJoint]).sub(vec(joints[hipJoint]));
++      const along = .30 + (id === 'hamstring_stretch' ? .35 * bend : 0);
++      target = vec(joints[hipJoint]).addScaledVector(thigh, along).add(new THREE.Vector3(0, .115 * h, 0)).toArray();
++      toward = [side * .3, 0, -1];
++      hand = thigh.normalize().add(new THREE.Vector3(0, -.12, 0)).toArray();
++      restingPalm = true;
++    } else if (id === 'wall_sit') {
++      target = [side * .20 * h, .75 * h, .23 * h];
+       toward = [side * .3, -1, 0];
+       hand = null; // Rested hands follow the forearm instead of bending down at the wrist.
+     } else if (id === 'standing_knee_crunch') {
+@@ -308,16 +322,17 @@ export function standingCatalogPose(id, progress, rest) {
+           : (i === active ? -1 : 1) * lift;
+       const brisk = id === 'brisk_walk';
+       target = [joints[root][0] + side * .02 * h, joints[root][1] - (brisk ? .30 : .39) * h, joints[root][2] + (brisk ? .18 : .13) * h * swing + (brisk ? .12 : .03) * h];
+-      toward = [0, -.2, 1];
++      toward = [side * .2, -.2, -1];
+     }
+     [joints[elbow], joints[wrist]] = solveLimb(joints[root], target, upper, lower, toward);
+     const direction = hand ? normalized(hand) : vec(joints[wrist]).sub(vec(joints[elbow])).normalize();
+     joints[finger] = vec(joints[wrist]).addScaledVector(direction, length(wrist, finger)).toArray();
+-    if (id === 'wall_push' || id === 'close_wall_push' || id === 'calf_stretch') {
++    if (id === 'wall_push' || id === 'close_wall_push' || id === 'calf_stretch' || restingPalm) {
+       // Map the anatomical hand frame directly onto the vertical support:
+       // fingers up, palm forward. Keep the wrist behind the contact plane.
++      // A palm resting on a thigh lies along it with the back of the hand up.
+       const {along,back}=handRestFrame(rest,i);
+-      const palmRotation=orientation([0,1,0],[0,0,-1]).multiply(orientation(along.toArray(),back.toArray()).invert());
++      const palmRotation=(restingPalm?orientation(hand,[0,1,0]):orientation([0,1,0],[0,0,-1])).multiply(orientation(along.toArray(),back.toArray()).invert());
+       joints.boneRotations[12 + i] = palmRotation.toArray();
+       // Preserve the palm's roll through the lower arm. A shortest-direction
+       // forearm rotation twisted the blended wrist skin through the wall even
+diff --git a/frontend/src/health/components/exercise/stretchRig.js b/frontend/src/health/components/exercise/stretchRig.js
+index 8067bc2..abf84c7 100644
+--- a/frontend/src/health/components/exercise/stretchRig.js
++++ b/frontend/src/health/components/exercise/stretchRig.js
+@@ -51,8 +51,9 @@ function rawStretchPose(motion,t,rest){
+   const sign=side?-1:1,[root,knee,ankle]=side?[12,13,14]:[9,10,11];
+   const dy=j[root][1]-.085*h,dx=j[root][0]-sign*.14*h,thigh=segmentLength(rest,root,knee);
+   j[knee]=[sign*.14*h,.085*h,j[root][2]+Math.sqrt(Math.max(0,thigh*thigh-dy*dy-dx*dx))];
+-  const shin=segmentLength(rest,knee,ankle),rise=.015*h;
+-  j[ankle]=[j[knee][0],.10*h,j[knee][2]-Math.sqrt(shin*shin-rise*rise)];
++  // The ankle rests at instep height (dorsum on the mat), below the knee.
++  const shin=segmentLength(rest,knee,ankle),ankleY=.058*h,rise=j[knee][1]-ankleY;
++  j[ankle]=[j[knee][0],ankleY,j[knee][2]-Math.sqrt(shin*shin-rise*rise)];
+   arm(side,[sign*.20+(id==='child_side'?.12*amount:0),.047,.36],[sign*.15,1,0]);
+  }}
+  switch(id){
+@@ -97,7 +98,9 @@ function rawStretchPose(motion,t,rest){
+   if(side===0&&id.startsWith('wrist_'))direction=vector(direction).applyAxisAngle(new THREE.Vector3(1,0,0),(id==='wrist_flex'?-1:1)*Math.PI/3*amount).toArray();
+   setHand(j,rest,side,direction);
+   const footRotation=(seated||supine)?new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),-Math.PI/2):new THREE.Quaternion();
+-  if(child)footRotation.setFromAxisAngle(new THREE.Vector3(0,1,0),Math.PI);
++  // Sitting back on the heels rests each foot on its instep, toes along the
++  // shin. A 180° yaw kept the sole down and twisted the ankle half a turn.
++  if(child){const [k,a]=side?[13,14]:[10,11],front=vector(j[a]).sub(vector(j[k])).normalize().add(new THREE.Vector3(0,-.45,0)).normalize();footRotation.copy(orientation(new THREE.Vector3(0,-1,0).addScaledVector(front,front.y).normalize().toArray(),front.toArray()));}
+   if(id==='quad_stand'&&side===0)footRotation.setFromAxisAngle(new THREE.Vector3(1,0,0),-1.2*amount);
+   if(id==='ankle_circles'&&side===0)footRotation.setFromAxisAngle(new THREE.Vector3(1,0,0),-Math.PI/2+Math.cos(t*Math.PI*4)*.18).premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),Math.sin(t*Math.PI*4)*.18));
+   setFoot(j,rest,side,footRotation);j.boneRotations[side?11:10]=footRotation.toArray();
+@@ -137,8 +140,14 @@ export function stretchPoseJoints(motion,t,rest){
+  const limbs=[[3,4,2],[4,5,3],[6,7,4],[7,8,5]];
+  if(['quad_stand','knee_hug','double_knee','supine_hamstring'].includes(id))limbs.push([9,10,6],[10,11,7],[12,13,8],[13,14,9]);
+  limbs.push([5,17,12],[8,18,13]);
++ // Distal segments blend in their parent's frame. Slerping a forearm in world
++ // space independently of its upper arm swept it behind the elbow mid-raise.
++ const parents={3:2,5:4,7:6,9:8,12:3,13:5};
++ const quaternion=(pose,bone)=>new THREE.Quaternion().fromArray(pose.boneRotations[bone]);
+  for(const [a,b,bone] of limbs){
+-  const rotation=new THREE.Quaternion().fromArray(start.boneRotations[bone]).slerp(new THREE.Quaternion().fromArray(end.boneRotations[bone]),amount);
++  const parent=parents[bone];
++  const rotation=parent===undefined?quaternion(start,bone).slerp(quaternion(end,bone),amount)
++   :quaternion(start,parent).invert().multiply(quaternion(start,bone)).slerp(quaternion(end,parent).invert().multiply(quaternion(end,bone)),amount).premultiply(quaternion(posed,parent));
+   posed.boneRotations[bone]=rotation.toArray();posed[b]=vector(rest[b]).sub(vector(rest[a])).applyQuaternion(rotation).add(vector(posed[a])).toArray();
+  }
+  for(const [ankle,toe,bone] of [[11,15,10],[14,16,11]])posed[toe]=vector(rest[toe]).sub(vector(rest[ankle])).applyQuaternion(new THREE.Quaternion().fromArray(posed.boneRotations[bone])).add(vector(posed[ankle])).toArray();
+diff --git a/frontend/tests/AnkleTwist.test.js b/frontend/tests/AnkleTwist.test.js
+new file mode 100644
+index 0000000..99da2f1
+--- /dev/null
++++ b/frontend/tests/AnkleTwist.test.js
+@@ -0,0 +1,25 @@
++import {it,expect} from 'vitest';
++import {Vector3} from 'three';
++import catalog from '../src/shared/lib/localCatalog.json';
++import {STRETCHES} from '../src/health/components/exercise/stretchCatalog.js';
++import {poseJoints,rigRotation} from '../src/health/components/exercise/rig.js';
++
++// The foot shares the shin's medial-lateral axis; an ankle only flexes about it
++// and inverts a little. A foot yawed 180° under a horizontal shin (sole down,
++// toes back) twisted the ankle half a turn in prone and kneeling exercises.
++it('keeps every foot aligned with its shin instead of twisting the ankle',()=>{
++ // Butterfly and figure-four shins have no authored twist (shortest arc), so
++ // their lateral axis is not a meaningful reference for the turned-out feet.
++ const unauthoredShins=new Set(['recovery_butterfly','recovery_figure_four']);
++ for(const {motion_id:id} of [...catalog,...STRETCHES]){
++  if(unauthoredShins.has(id))continue;
++  for(let f=0;f<=40;f++){
++   const t=f/40,p=poseJoints(id,t);
++   for(const [shin,foot] of [[7,10],[9,11]]){
++    const lateral=new Vector3(1,0,0);
++    const alignment=lateral.clone().applyQuaternion(rigRotation(p,shin)).dot(lateral.clone().applyQuaternion(rigRotation(p,foot)));
++    expect(alignment,`${id} ankle ${foot} at ${t}`).toBeGreaterThan(.5);
++   }
++  }
++ }
++});
+diff --git a/frontend/tests/ElbowHinge.test.js b/frontend/tests/ElbowHinge.test.js
+new file mode 100644
+index 0000000..c149c30
+--- /dev/null
++++ b/frontend/tests/ElbowHinge.test.js
+@@ -0,0 +1,46 @@
++import {it,expect} from 'vitest';
++import {Quaternion,Vector3} from 'three';
++import catalog from '../src/shared/lib/localCatalog.json';
++import {STRETCHES} from '../src/health/components/exercise/stretchCatalog.js';
++import {poseJoints,REST} from '../src/health/components/exercise/rig.js';
++
++const v=p=>new Vector3(...p),DEG=180/Math.PI;
++// Signed elbow flexion in the hanging upper arm's own frame: positive folds the
++// forearm forward, negative bends it behind the elbow (hyperextension).
++function elbowFlexion(p,[shoulder,elbow,wrist]){
++ const trunk=v(p[1]).sub(v(p[0])).normalize();
++ const toTrunk=new Quaternion().setFromUnitVectors(trunk,new Vector3(0,1,0));
++ const upper=v(p[elbow]).sub(v(p[shoulder])).normalize().applyQuaternion(toTrunk);
++ if(trunk.y<.7||upper.y>-.75)return null; // only an upright trunk with a hanging arm has an unambiguous hinge plane
++ const restUpper=v(REST[elbow]).sub(v(REST[shoulder])).normalize();
++ const forearm=v(p[wrist]).sub(v(p[elbow])).normalize().applyQuaternion(toTrunk).applyQuaternion(new Quaternion().setFromUnitVectors(upper,restUpper));
++ const along=forearm.dot(restUpper);
++ if(along<Math.cos(120/DEG))return null; // deeply folded elbows are checked by their contacts, not this plane
++ return Math.atan2(forearm.z-restUpper.z*along,along)*DEG;
++}
++
++it('never bends a hanging or swinging elbow backwards',()=>{
++ for(const {motion_id:id} of [...catalog,...STRETCHES]){
++  for(let f=0;f<=60;f++){
++   const t=f/60,p=poseJoints(id,t);
++   for(const arm of [[3,4,5],[6,7,8]]){
++    const flexion=elbowFlexion(p,arm);
++    if(flexion!==null)expect(flexion,`${id} elbow ${arm[1]} at ${t.toFixed(3)}`).toBeGreaterThan(-25);
++   }
++  }
++ }
++});
++
++it('blends stretch forearms in the upper-arm frame through the raise',()=>{
++ // Mid-transition the forearm must stay close to its interpolated elbow angle,
++ // rather than sweeping through the elbow as independent world slerps did.
++ const angle=(p,[s,e,w])=>v(p[e]).sub(v(p[s])).angleTo(v(p[w]).sub(v(p[e])))*DEG;
++ for(const id of ['recovery_triceps','recovery_shoulder_cross','recovery_chest_open']){
++  const start=angle(poseJoints(id,0),[3,4,5]),end=angle(poseJoints(id,.5),[3,4,5]);
++  for(let f=1;f<12;f++){
++   const value=angle(poseJoints(id,f/100),[3,4,5]);
++   expect(value,`${id} at ${f}%`).toBeGreaterThan(Math.min(start,end)-5);
++   expect(value,`${id} at ${f}%`).toBeLessThan(Math.max(start,end)+5);
++  }
++ }
++});
+diff --git a/frontend/tests/JointSeams.test.js b/frontend/tests/JointSeams.test.js
+new file mode 100644
+index 0000000..36fa057
+--- /dev/null
++++ b/frontend/tests/JointSeams.test.js
+@@ -0,0 +1,63 @@
++import {it,expect} from 'vitest';
++import {Quaternion,Vector3} from 'three';
++import {poseJoints,REST,BONES,rigRotation} from '../src/health/components/exercise/rig.js';
++import {handRestFrame} from '../src/health/components/exercise/exerciseGrip.js';
++
++const v=p=>new Vector3(...p),DEG=180/Math.PI,cycle=[0,.125,.25,.375,.5,.625,.75,.875];
++// Twist of the forearm about its own axis relative to the upper arm, as the
++// dual-quaternion skin sees it at the elbow seam.
++function elbowTwist(p,upper){
++ const relative=rigRotation(p,upper).invert().multiply(rigRotation(p,upper+1));
++ if(relative.w<0)relative.set(-relative.x,-relative.y,-relative.z,-relative.w);
++ const [a,b]=BONES[upper+1],axis=v(REST[b]).sub(v(REST[a])).normalize();
++ return Math.abs(2*Math.atan2(relative.x*axis.x+relative.y*axis.y+relative.z*axis.z,relative.w))*DEG;
++}
++const handBack=(p,side)=>handRestFrame(REST,side).back.applyQuaternion(new Quaternion().fromArray(p.boneRotations[12+side]));
++
++it('keeps pressing elbows untwisted so their skin does not crumple',()=>{
++ for(const id of ['shoulder_press','dumbbell_bench_press','dumbbell_floor_press','barbell_bench_press'])for(const t of cycle){
++  const p=poseJoints(id,t);
++  for(const upper of [2,4])expect(elbowTwist(p,upper),`${id} elbow ${upper} at ${t}`).toBeLessThan(35);
++ }
++});
++
++it('uses overhand grips for presses, bench and hinge lifts',()=>{
++ for(const t of cycle){
++  for(const side of [0,1]){
++   expect(handBack(poseJoints('shoulder_press',t),side).z,'press palms forward').toBeLessThan(-.5);
++   for(const id of ['barbell_rdl','dumbbell_rdl'])expect(handBack(poseJoints(id,t),side).z,`${id} knuckles forward`).toBeGreaterThan(.5);
++   const bench=poseJoints('barbell_bench_press',t),towardHead=v(bench[2]).sub(v(bench[0])).setY(0).normalize();
++   expect(handBack(bench,side).dot(towardHead),'bench knuckles toward the head').toBeGreaterThan(.5);
++  }
++ }
++});
++
++it('bends side-plank knees backwards and keeps the raised bridge foot square',()=>{
++ const plank=poseJoints('knee_side_plank',0);
++ // The body faces +x; shins trail behind it.
++ for(const [knee,ankle] of [[10,11],[13,14]])expect(plank[ankle][0]-plank[knee][0]).toBeLessThan(-.2);
++ for(const t of cycle){
++  const p=poseJoints('single_bridge',t);
++  const angle=v(p[10]).sub(v(p[11])).angleTo(v(p[15]).sub(v(p[11])))*DEG;
++  expect(angle,`raised ankle at ${t}`).toBeGreaterThan(80);
++  expect(angle,`raised ankle at ${t}`).toBeLessThan(130);
++ }
++});
++
++it('rests seated palms on the thighs and the side-lying hand on the mat',()=>{
++ for(const id of ['ankle_pump','seated_calf','march','hamstring_stretch'])for(const t of cycle){
++  const p=poseJoints(id,t);
++  for(const [wrist,hip,knee] of [[5,9,10],[8,12,13]]){
++   const thigh=v(p[knee]).sub(v(p[hip])),offset=v(p[wrist]).sub(v(p[hip]));
++   const along=offset.dot(thigh)/thigh.lengthSq(),height=offset.y-thigh.y*along;
++   expect(height,`${id} wrist above thigh at ${t}`).toBeLessThan(.16);
++   expect(height,`${id} wrist above thigh at ${t}`).toBeGreaterThan(.08);
++  }
++ }
++ for(const t of cycle){
++  const p=poseJoints('clamshell',t);
++  // The lower hand lies on the mat in front of the face, not over the scalp.
++  expect(p[18][1]).toBeLessThan(.08);
++  expect(p[8][0]-p[2][0]).toBeGreaterThan(.1);
++ }
++});
+-- 
+2.43.0
+

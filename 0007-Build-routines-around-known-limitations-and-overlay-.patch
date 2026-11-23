@@ -1,0 +1,495 @@
+From 54f704699a87d300ebec9db2a7ca86dd9c2e8254 Mon Sep 17 00:00:00 2001
+From: ksg136 <ksg136@users.noreply.github.com>
+Date: Mon, 23 Nov 2026 19:57:08 +0900
+Subject: [PATCH] Build routines around known limitations and overlay a
+ same-height standard body
+
+Local routine generation now follows the server's limitation rules: known
+body parts exclude tagged exercises, while unknown or high-risk conditions
+still require a consultation. The body view overlays a standard body built
+from height and sex alone instead of requiring birth date and literature means.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../e2e-local/composition-mannequin.spec.js   | 31 +++++-----
+ .../health/components/body3d/BodyScene.jsx    |  2 +-
+ .../body3d/CompositionMannequin.jsx           | 35 +++++------
+ .../body3d/MuscleComparisonReadout.jsx        |  4 +-
+ .../body3d/SegmentComparisonReadout.jsx       |  4 +-
+ .../src/health/lib/standardBodyReference.js   | 32 ++++++++++
+ frontend/src/shared/lib/localApi.js           | 21 ++++++-
+ frontend/src/shared/lib/localRoutinePlan.js   |  7 ++-
+ frontend/tests/CompositionMannequin.test.jsx  | 60 +++++++++----------
+ frontend/tests/LocalApi.test.js               | 17 ++++++
+ frontend/tests/LocalRoutinePlan.test.js       | 10 ++++
+ .../tests/SegmentComparisonReadout.test.jsx   |  2 +-
+ 12 files changed, 148 insertions(+), 77 deletions(-)
+ create mode 100644 frontend/src/health/lib/standardBodyReference.js
+
+diff --git a/frontend/e2e-local/composition-mannequin.spec.js b/frontend/e2e-local/composition-mannequin.spec.js
+index 8dcab60..adc013d 100644
+--- a/frontend/e2e-local/composition-mannequin.spec.js
++++ b/frontend/e2e-local/composition-mannequin.spec.js
+@@ -60,19 +60,19 @@ test('InBody inputs restore and render two distinct translucent mannequins offli
+  await expect.poll(async()=>{try{return (await stats(page)).layers.length;}catch{return 0;}},{timeout:30000}).toBe(2);
+  const initial=await stats(page);expect(initial.layers.map(l=>l.name).sort()).toEqual(['my-muscle','reference-average']);
+  expect(initial.layout).toBe('overlap');await expectRegisteredBodies(page);
+- await expect(page.locator('.mannequin-scene-key .own')).toHaveText('내 몸 30 kg');await expect(page.locator('.mannequin-scene-key .reference')).toHaveText('평균 33 kg');
++ await expect(page.locator('.mannequin-scene-key .own')).toHaveText('내 몸 30 kg');await expect(page.locator('.mannequin-scene-key .reference')).toHaveText('표준 체형 29.6 kg');
+  expect(initial.layers.find(l=>l.name==='my-muscle')).toMatchObject({opacity:.5,color:'#007f91',headColor:'#007f91',roughness:.86});expect(initial.layers.find(l=>l.name==='reference-average')).toMatchObject({opacity:.3,color:'#ed9748',headColor:'#ed9748',roughness:.86});
+  expect(initial.layers[0].shapeFingerprint).not.toBe(initial.layers[1].shapeFingerprint);
+- await expect(page.getByLabel('내 골격근량과 평균의 차이')).toContainText('문헌 평균보다 3 kg 적어요');
++ await expect(page.getByLabel('내 골격근량과 평균의 차이')).toContainText('표준 체형보다 0.4 kg 많아요');
+  expect(initial.layers.every(l=>l.opacity>0&&l.opacity<1&&!l.wireframe)).toBe(true);
+- await expect(page.locator('.mannequin-mass-comparison')).toContainText('33');await expect(page.locator('.mannequin-stats')).toContainText('추정 골량');await expect(page.locator('.mannequin-stats')).toContainText('3.7');
++ await expect(page.locator('.mannequin-mass-comparison')).toContainText('29.6');await expect(page.locator('.mannequin-stats')).toContainText('추정 골량');await expect(page.locator('.mannequin-stats')).toContainText('3.7');
+  await page.locator('.mannequin-scene').scrollIntoViewIfNeeded();await chooseView(page,'후면');
+  const back=await page.locator('[data-camera]').getAttribute('data-camera');await chooseView(page,'정면');await expect.poll(()=>page.locator('[data-camera]').getAttribute('data-camera')).not.toBe(back);
+  await chooseView(page,'왼쪽');await expectRegisteredBodies(page);await chooseView(page,'오른쪽');await expectRegisteredBodies(page);
+  await page.getByRole('button',{name:'나란히 비교',exact:true}).click();await expectSeparatedBodies(page);await page.getByRole('button',{name:'겹쳐보기',exact:true}).click();await expectRegisteredBodies(page);
+  await page.getByText('투명도 · 골격 · 표현 설정').click();await page.getByLabel('내 마네킹 투명도').fill('80');await page.getByLabel('평균 마네킹 투명도').fill('75');await chooseView(page,'후면');
+  await expect.poll(async()=>(await stats(page)).layers.find(l=>l.name==='my-muscle').opacity).toBe(.2);await expect.poll(async()=>(await stats(page)).layers.find(l=>l.name==='reference-average').opacity).toBe(.25);
+- await page.getByRole('checkbox',{name:'평균 윤곽선 보기',exact:true}).uncheck();await expect.poll(async()=>(await stats(page)).contour).toBeNull();expect((await stats(page)).layers.find(l=>l.name==='reference-average')).toMatchObject({opacity:.25,wireframe:false});await page.getByRole('checkbox',{name:'평균 윤곽선 보기',exact:true}).check();
++ await page.getByRole('checkbox',{name:'표준 체형 윤곽선 보기',exact:true}).uncheck();await expect.poll(async()=>(await stats(page)).contour).toBeNull();expect((await stats(page)).layers.find(l=>l.name==='reference-average')).toMatchObject({opacity:.25,wireframe:false});await page.getByRole('checkbox',{name:'표준 체형 윤곽선 보기',exact:true}).check();
+  await page.getByRole('checkbox',{name:/골격 구조 보기/}).check();await chooseView(page,'정면');await expect.poll(async()=>(await stats(page)).meshCount).toBeGreaterThan(20);
+  await page.getByRole('checkbox',{name:/골격 구조 보기/}).uncheck();await page.getByLabel('내 마네킹 투명도').fill('50');await page.getByLabel('평균 마네킹 투명도').fill('70');await page.getByText('투명도 · 골격 · 표현 설정').click();
+  for(const viewport of [{width:393,height:852},{width:360,height:640}]){
+@@ -87,7 +87,7 @@ test('InBody inputs restore and render two distinct translucent mannequins offli
+  await page.setViewportSize({width:393,height:852});await page.screenshot({path:info.outputPath('mannequin-page.png'),fullPage:true});
+  await page.getByRole('button',{name:'내 몸만',exact:true}).click();await expect.poll(async()=>(await stats(page)).layers.length).toBe(1);
+  expect((await stats(page)).layers[0].headOcclusion).toMatchObject({sourceBody:'my-muscle',colorWrite:false,depthWrite:true,sharedPositions:true});
+- await page.getByRole('button',{name:'평균 비교 모형',exact:true}).click();await expect.poll(async()=>(await stats(page)).layers.map(layer=>layer.name)).toEqual(['reference-average']);
++ await page.getByRole('button',{name:'표준 체형 모형',exact:true}).click();await expect.poll(async()=>(await stats(page)).layers.map(layer=>layer.name)).toEqual(['reference-average']);
+  expect((await stats(page)).layers[0]).toMatchObject({name:'reference-average',opacity:.3,headVisible:true,headOcclusion:{sourceBody:'reference-average',colorWrite:false,depthWrite:true,sharedPositions:true}});
+  await context.setOffline(true);await page.getByRole('button',{name:'겹쳐보기',exact:true}).click();await chooseView(page,'후면');
+  await expect.poll(async()=>(await stats(page)).layers.length).toBe(2);
+@@ -102,18 +102,17 @@ test('InBody inputs restore and render two distinct translucent mannequins offli
+  const home=await stats(page);expect(home.layers.find(l=>l.name==='my-muscle')).toMatchObject({opacity:.5,color:'#007f91',headColor:'#007f91'});expect(home.layers.find(l=>l.name==='reference-average')).toMatchObject({opacity:.3,color:'#ed9748',headColor:'#ed9748'});
+  expect(requests).toEqual([]);expect(errors).toEqual([]);
+ });
+-test('average appears only after actual eligible profile inputs and aligns with the personal body in 3D',async({page})=>{
++test('same-height, same-sex standard body appears without birth date or extra inputs and aligns with the personal body in 3D',async({page})=>{
+  await page.goto('/health/body');await expect(page.getByRole('link',{name:'측정값 입력하기',exact:true})).toBeVisible();await page.getByRole('link',{name:'측정값 입력하기',exact:true}).click();
+  await page.getByLabel('체중 (kg)',{exact:true}).fill('60');await page.getByLabel('골격근량 (kg)',{exact:true}).fill('24');await page.getByLabel('키 (cm)',{exact:true}).first().fill('170');await page.getByLabel('체지방률 (%)',{exact:true}).fill('25');await page.getByRole('button',{name:'측정값 저장',exact:true}).click();await expect(page.getByRole('status').filter({hasText:'측정값을 저장했습니다.'})).toBeVisible();
+- await page.goto('/health/body');await expect(page.getByRole('status').filter({hasText:'성별 · 생년월일'})).toBeVisible();await expect(page.getByRole('link',{name:'평균 모형에 필요한 정보 입력',exact:true})).toHaveAttribute('href','/health/profile');
+- await expect(page.getByRole('button',{name:'평균 비교 모형',exact:true})).toBeDisabled();await expect.poll(async()=>{try{return (await stats(page)).layers.length;}catch{return 0;}}).toBe(1);
+- await page.goto('/health/profile');await page.getByLabel('인체 모형 성별').selectOption('female');await page.getByLabel('생년월일').fill('2015-01-01');await page.getByRole('button',{name:'저장하기',exact:true}).click();await expect(page.getByRole('alert').filter({hasText:'만 14세 이상만 사용할 수 있습니다.'})).toBeVisible();await page.getByLabel('생년월일').fill('2010-01-01');await page.getByRole('button',{name:'저장하기',exact:true}).click();
+- await expect(page.getByText('저장되었습니다.',{exact:true})).toBeVisible();await page.goto('/health/body');await expect(page.getByRole('status').filter({hasText:'18–88세'})).toBeVisible();await expect(page.getByRole('button',{name:'평균 비교 모형',exact:true})).toBeDisabled();
+- await page.goto('/health/profile');await page.getByLabel('생년월일').fill('1995-01-01');await page.getByRole('button',{name:'저장하기',exact:true}).click();await expect(page.getByText('저장되었습니다.',{exact:true})).toBeVisible();await page.goto('/health/body');await expectRegisteredBodies(page);await expect(page.locator('.mannequin-mass-comparison')).toContainText('21');
++ await page.goto('/health/body');await expect(page.getByRole('status').filter({hasText:'성별'})).toBeVisible();await expect(page.getByRole('link',{name:'프로필에서 성별 설정',exact:true})).toHaveAttribute('href','/health/profile');
++ await expect(page.getByRole('button',{name:'표준 체형 모형',exact:true})).toBeDisabled();await expect.poll(async()=>{try{return (await stats(page)).layers.length;}catch{return 0;}}).toBe(1);
++ await page.goto('/health/profile');await page.getByLabel('인체 모형 성별').selectOption('female');await page.getByRole('button',{name:'저장하기',exact:true}).click();await expect(page.getByText('저장되었습니다.',{exact:true})).toBeVisible();
++ await page.goto('/health/body');await expectRegisteredBodies(page);await expect(page.locator('.mannequin-mass-comparison')).toContainText('표준 60.7 kg');await expect(page.locator('.mannequin-mass-comparison')).toContainText('표준 23%');await expect(page.locator('.mannequin-mass-comparison')).toContainText('표준 24.9 kg');
+ });
+-test('equal muscle mass aligns exactly and greater own mass keeps both contrasting boundaries visible',async({page},info)=>{
++test('a body equal to the standard aligns exactly and greater own mass keeps both contrasting boundaries visible',async({page},info)=>{
+  await page.goto('/health/profile');await page.getByLabel('인체 모형 성별').selectOption('male');await page.getByLabel('생년월일').fill('1996-01-01');await page.getByRole('button',{name:'저장하기',exact:true}).click();await expect(page.getByText('저장되었습니다.',{exact:true})).toBeVisible();
+- for(const [label,value] of [['체중 (kg)','78'],['키 (cm)','178'],['골격근량 (kg)','33'],['체지방률 (%)','23']])await page.getByLabel(label,{exact:true}).first().fill(value);
++ for(const [label,value] of [['체중 (kg)','69.7'],['키 (cm)','178'],['골격근량 (kg)','30'],['체지방률 (%)','15']])await page.getByLabel(label,{exact:true}).first().fill(value);
+  await page.getByRole('button',{name:'측정값 저장',exact:true}).click();await expect(page.getByRole('status').filter({hasText:'측정값을 저장했습니다.'})).toBeVisible();await page.goto('/health/body');
+  for(const name of ['정면','후면','왼쪽','오른쪽']){
+   await chooseView(page,name);await expectRegisteredBodies(page);
+@@ -123,7 +122,7 @@ test('equal muscle mass aligns exactly and greater own mass keeps both contrasti
+  for(const [label,value] of [['체중 (kg)','78'],['키 (cm)','178'],['골격근량 (kg)','39'],['체지방률 (%)','23']])await page.getByLabel(label,{exact:true}).first().fill(value);
+  await page.getByRole('button',{name:'측정값 저장',exact:true}).click();await expect(page.getByRole('status').filter({hasText:'측정값을 저장했습니다.'})).toBeVisible();
+  await page.goto('/health/body');await expectRegisteredBodies(page);
+- await expect(page.getByLabel('내 골격근량과 평균의 차이')).toContainText('문헌 평균보다 6 kg 많아요');
++ await expect(page.getByLabel('내 골격근량과 평균의 차이')).toContainText('표준 체형보다 0.5 kg 많아요');
+  const {layers}=await stats(page);expect(layers[0].shapeFingerprint).not.toBe(layers[1].shapeFingerprint);
+  await page.locator('.mannequin-scene').scrollIntoViewIfNeeded();
+  await page.locator('.mannequin-scene').screenshot({path:info.outputPath('mannequin-above-average.png')});
+@@ -165,7 +164,7 @@ test('body-area buttons frame both actual surfaces, turn the back, and restore t
+  await picker.getByRole('button',{name:'왼팔',exact:true}).click();await fit('left_arm');await page.getByRole('button',{name:'나란히 비교',exact:true}).click();await fit('left_arm');
+  await page.getByRole('button',{name:'겹쳐보기',exact:true}).click();await fit('left_arm');
+  await page.getByRole('button',{name:'내 몸만',exact:true}).click();await fit('left_arm');await expect.poll(async()=>(await stats(page)).layers.length).toBe(1);
+- await page.getByRole('button',{name:'평균 비교 모형',exact:true}).click();await fit('left_arm');await expect.poll(async()=>(await stats(page)).layers[0].name).toBe('reference-average');
++ await page.getByRole('button',{name:'표준 체형 모형',exact:true}).click();await fit('left_arm');await expect.poll(async()=>(await stats(page)).layers[0].name).toBe('reference-average');
+  await page.getByRole('button',{name:'겹쳐보기',exact:true}).click();await page.getByRole('button',{name:'초기화',exact:true}).click();await expectRegisteredBodies(page);await expect(picker.getByRole('button',{name:'전체 보기',exact:true})).toHaveAttribute('aria-pressed','true');
+  expect(errors).toEqual([]);
+ });
+@@ -186,7 +185,7 @@ test('selected areas show their own report differences, preserve them offline, a
+  await page.getByRole('button',{name:'측정값 저장',exact:true}).click();await expect(page.getByRole('status').filter({hasText:'측정값을 저장했습니다.'})).toBeVisible();await page.goto('/health/body');await expectRegisteredBodies(page);
+  const picker=page.getByRole('group',{name:'부위 확대 선택'}),card=page.getByRole('status',{name:'선택 부위 수치 비교'});
+  for(const [name,message] of [['왼팔','결과지 기준보다 0.3 kg 적어요'],['오른팔','결과지 기준보다 0.3 kg 많아요'],['왼다리','결과지 기준과 같아요']]){
+-  await picker.getByRole('button',{name,exact:true}).click();await expect(card).toContainText(`${name} 선택`);await expect(card.locator('.segment-comparison-difference')).toHaveText(message);await expect(card).toContainText('문헌 평균과 다릅니다');
++  await picker.getByRole('button',{name,exact:true}).click();await expect(card).toContainText(`${name} 선택`);await expect(card.locator('.segment-comparison-difference')).toHaveText(message);await expect(card).toContainText('3D 표준 체형과 다릅니다');
+   await expect.poll(()=>page.evaluate(()=>document.querySelector('.segment-comparison-readout').getBoundingClientRect().bottom<document.querySelector('.mannequin-scene canvas').getBoundingClientRect().top)).toBe(true);
+  }
+  await page.setViewportSize({width:360,height:640});await picker.getByRole('button',{name:'왼팔',exact:true}).click();
+diff --git a/frontend/src/health/components/body3d/BodyScene.jsx b/frontend/src/health/components/body3d/BodyScene.jsx
+index ecd2686..49f3658 100644
+--- a/frontend/src/health/components/body3d/BodyScene.jsx
++++ b/frontend/src/health/components/body3d/BodyScene.jsx
+@@ -69,7 +69,7 @@ export default function BodyScene({gender='unspecified',segmentColors,onSelect,s
+     </Suspense>
+     {mannequin&&interactive&&<div className="mannequin-scene-key" aria-label="3D 비교 색상과 골격근량">
+       {mannequin.options.showMy&&<span className="own"><i/>내 몸 <strong>{Number.isFinite(measurement?.skeletal_muscle_mass)?Number(measurement.skeletal_muscle_mass.toFixed(2))+' kg':'—'}</strong></span>}
+-      {mannequin.options.showReference&&mannequin.referenceMeasurement&&<span className="reference"><i/>평균 <strong>{Number.isFinite(mannequin.referenceMeasurement.skeletal_muscle_mass)?Number(mannequin.referenceMeasurement.skeletal_muscle_mass.toFixed(2))+' kg':'—'}</strong></span>}
++      {mannequin.options.showReference&&mannequin.referenceMeasurement&&<span className="reference"><i/>{mannequin.referenceLabel||'평균'} <strong>{Number.isFinite(mannequin.referenceMeasurement.skeletal_muscle_mass)?Number(mannequin.referenceMeasurement.skeletal_muscle_mass.toFixed(2))+' kg':'—'}</strong></span>}
+     </div>}
+     {interactive&&<div style={{position:'absolute',bottom:10,left:0,right:0,textAlign:'center',pointerEvents:'none',fontSize:'.73rem',color:mannequin?'#4e6268':'#536172'}}>드래그로 회전 · 두 손가락으로 확대 · 부위 터치로 선택</div>}
+   </div>;
+diff --git a/frontend/src/health/components/body3d/CompositionMannequin.jsx b/frontend/src/health/components/body3d/CompositionMannequin.jsx
+index 0dd0c31..819461c 100644
+--- a/frontend/src/health/components/body3d/CompositionMannequin.jsx
++++ b/frontend/src/health/components/body3d/CompositionMannequin.jsx
+@@ -3,8 +3,8 @@ import './mannequin.css';
+ import {Link} from 'react-router-dom';
+ import BodyScene from './BodyScene.jsx';
+ import {BODY_FOCUS_AREAS} from './mannequinFocus.js';
+-import {publishedMuscleReference,ageAt} from '../../lib/publishedMuscleReference.js';
+-import {referenceMannequinMeasurement,GIRTH_FIELDS} from './mannequinMath.js';
++import {standardBodyReference,STANDARD_BODY} from '../../lib/standardBodyReference.js';
++import {GIRTH_FIELDS} from './mannequinMath.js';
+ import {signed} from './overlayMath.js';
+ import MuscleComparisonReadout,{COMPARISON_OPACITY} from './MuscleComparisonReadout.jsx';
+ import SegmentComparisonReadout from './SegmentComparisonReadout.jsx';
+@@ -28,23 +28,21 @@ export default function CompositionMannequin({comparisonData,height=540}){
+   scrollToComparison();
+  }
+  const [myOpacity,setMyOpacity]=useState(COMPARISON_OPACITY.myOpacity),[referenceOpacity,setReferenceOpacity]=useState(COMPARISON_OPACITY.referenceOpacity),[skeleton,setSkeleton]=useState(false),[referenceWireframe,setReferenceWireframe]=useState(false),[referenceContour,setReferenceContour]=useState(true);
+- const reference=useMemo(()=>publishedMuscleReference(m,profile),[m,profile]);
+- const refMeasurement=useMemo(()=>reference.available&&reference.canOverlay?referenceMannequinMeasurement(m,reference.value):null,[m,reference.available,reference.canOverlay,reference.value]);
++ const reference=useMemo(()=>standardBodyReference(m,profile),[m,profile]);
++ const refMeasurement=reference.measurement||null;
+  const options={showMy:display!=='reference'||!refMeasurement,showReference:display!=='my',layout:display==='side-by-side'?'side-by-side':'overlap',myOpacity,referenceOpacity,skeleton,referenceWireframe,referenceContour};
+- const mannequin=useMemo(()=>({referenceMeasurement:refMeasurement,options}),[refMeasurement,display,myOpacity,referenceOpacity,skeleton,referenceWireframe,referenceContour]);
++ const mannequin=useMemo(()=>({referenceMeasurement:refMeasurement,referenceLabel:STANDARD_BODY.label,options}),[refMeasurement,display,myOpacity,referenceOpacity,skeleton,referenceWireframe,referenceContour]);
+  const missing=[['height','키'],['weight','체중'],['body_fat_percentage','체지방률'],['skeletal_muscle_mass','골격근량']].filter(([k])=>!Number.isFinite(k==='height'?m?.height||profile.height_cm:m?.[k])).map(([,label])=>label);
+- const referenceMissing=[...(!['male','female'].includes(profile.gender)?['성별']:[]),...(ageAt(profile.birth_date,m?.measurement_date)==null?['생년월일']:[]),...missing];
+- const age=ageAt(profile.birth_date,m?.measurement_date),outsideStudyAge=age!=null&&(age<18||age>88),referenceNeedsInput=referenceMissing.length>0&&!outsideStudyAge;
+  if(!m)return <p>인바디 결과지의 수치를 입력하면 내 마네킹이 만들어집니다. <Link to="/health/profile">측정값 입력하기</Link></p>;
+  return <div className="composition-mannequin" aria-label="내 체성분 마네킹">
+   <div className="mannequin-heading"><div><span className="mannequin-eyebrow">MY BODY</span><h3>수치로 그린 내 몸</h3><p className="muted">{m.measurement_date} 측정 · 반투명 3D</p></div><Link className="btn btn-secondary" to="/health/profile">인바디 수치 입력</Link></div>
+   <div className="mannequin-stats">{[['키',m.height||profile.height_cm,'cm'],['체중',m.weight,'kg'],['체지방률',m.body_fat_percentage,'%'],['골격근량',m.skeletal_muscle_mass,'kg'],...(Number.isFinite(m.bone_mass)?[['추정 골량',m.bone_mass,'kg']]:[]),...(Number.isFinite(m.mineral_mass)?[['무기질량',m.mineral_mass,'kg']]:[])].map(([name,value,unit])=><div key={name}><span>{name}</span><strong>{format(value)} <small>{unit}</small></strong></div>)}</div>
+   {missing.length>0&&<p role="status" className="mannequin-note">{missing.join('·')} 미입력: 해당 부분은 기본 형상입니다. <Link to="/health/profile">측정값 보완</Link></p>}
+-  {!refMeasurement&&<div className="mannequin-reference-setup" role="status"><strong>평균 3D 모형 {referenceNeedsInput?'입력 확인':'표시 조건 확인'}</strong><p>{outsideStudyAge?'이 연구의 대상은 18–88세입니다. 해당 연령 밖에서는 평균 모형을 표시하지 않습니다.':referenceNeedsInput?`${referenceMissing.join(' · ')}을 입력하면 내 몸과 문헌 평균을 겹쳐 비교할 수 있습니다.`:reference.available?reference.overlayReason:reference.reason}</p>{referenceNeedsInput&&<Link className="btn btn-secondary" to="/health/profile">평균 모형에 필요한 정보 입력</Link>}</div>}
+-  <div className="mannequin-display" aria-label="마네킹 표시 선택">{[['overlap','겹쳐보기'],['side-by-side','나란히 비교'],['my','내 몸만'],['reference','평균 비교 모형']].map(([id,title])=><button className={`btn ${display===id?'btn-primary':'btn-ghost'}`} key={id} aria-pressed={display===id} disabled={['side-by-side','reference'].includes(id)&&!refMeasurement} onClick={()=>setDisplay(id)}>{title}</button>)}</div>
+-  <div className={`mannequin-legend ${display==='side-by-side'&&refMeasurement?'paired':''}`}>{options.showMy&&<span><i/>내 체성분 · {format(m.skeletal_muscle_mass)} kg</span>}{options.showReference&&refMeasurement&&<span><i className="reference"/>문헌 평균 · {format(reference.value)} kg</span>}</div>
++  {!refMeasurement&&<div className="mannequin-reference-setup" role="status"><strong>표준 체형 3D 모형 입력 확인</strong><p>{reference.reason}</p><Link className="btn btn-secondary" to="/health/profile">프로필에서 {reference.missing.join('·')} 설정</Link></div>}
++  <div className="mannequin-display" aria-label="마네킹 표시 선택">{[['overlap','겹쳐보기'],['side-by-side','나란히 비교'],['my','내 몸만'],['reference','표준 체형 모형']].map(([id,title])=><button className={`btn ${display===id?'btn-primary':'btn-ghost'}`} key={id} aria-pressed={display===id} disabled={['side-by-side','reference'].includes(id)&&!refMeasurement} onClick={()=>setDisplay(id)}>{title}</button>)}</div>
++  <div className={`mannequin-legend ${display==='side-by-side'&&refMeasurement?'paired':''}`}>{options.showMy&&<span><i/>내 체성분 · {format(m.skeletal_muscle_mass)} kg</span>}{options.showReference&&refMeasurement&&<span><i className="reference"/>{STANDARD_BODY.label} · {reference.value!=null?`${format(reference.value)} kg`:`체중 ${format(reference.weight)} kg`}</span>}</div>
+   <MuscleComparisonReadout reference={reference} own={m.skeletal_muscle_mass}/>
+-  {refMeasurement&&options.showMy&&options.showReference&&<p className="mannequin-comparison-hint">{display==='side-by-side'?'왼쪽은 내 몸, 오른쪽은 문헌 평균 골격근량을 반영한 3D 모형입니다.':'내 몸과 문헌 평균 모형의 키·발 위치를 맞춰 같은 자리에 겹쳤습니다.'} 청록색 반투명 신체는 내 몸, 살구색 반투명 신체는 문헌 평균입니다. 두 신체의 색 면과 입체적인 부피를 겹쳐 비교하세요. 얇은 윤곽선은 경계를 구분하는 보조 표시입니다. {reference.differenceKg===0?'골격근량이 같아 두 신체가 같은 크기로 겹칩니다.':reference.differenceKg>0?'내 몸의 청록색 면이 더 바깥으로 드러나는 부분을 확인하세요.':'평균의 살구색 면이 더 바깥으로 드러나는 부분을 확인하세요.'} {display==='overlap'&&'얼굴과 목은 내 모형 하나로 표시합니다.'}</p>}
++  {refMeasurement&&options.showMy&&options.showReference&&<p className="mannequin-comparison-hint">{display==='side-by-side'?'왼쪽은 내 몸, 오른쪽은 같은 키·성별의 표준 체형 3D 모형입니다.':'내 몸과 같은 키·성별 표준 체형 모형의 키·발 위치를 맞춰 같은 자리에 겹쳤습니다.'} 청록색 반투명 신체는 내 몸, 살구색 반투명 신체는 표준 체형입니다. 두 신체의 색 면과 입체적인 부피를 겹쳐 비교하세요. 얇은 윤곽선은 경계를 구분하는 보조 표시입니다. 청록색 면이 바깥으로 드러나면 내 몸이, 살구색 면이 드러나면 표준 체형이 더 큰 부분입니다. {display==='overlap'&&'얼굴과 목은 내 모형 하나로 표시합니다.'}</p>}
+   <div className="mannequin-focus-picker" role="group" aria-label="부위 확대 선택">
+    <strong>자세히 볼 부위</strong><div>{BODY_FOCUS_AREAS.map(area=><button type="button" key={area.id} className={`btn ${focusRegion===area.id?'btn-primary':'btn-ghost'}`} aria-pressed={focusRegion===area.id} onClick={()=>focusArea(area)}>{area.label}</button>)}</div>
+    <p aria-live="polite">{focusRegion==='whole'?'부위를 누르면 해당 부위를 크게 보여줍니다.':`${BODY_FOCUS_AREAS.find(a=>a.id===focusRegion).label} 확대 보기 · 드래그로 돌려서 비교하세요.`}</p>
+@@ -58,15 +56,14 @@ export default function CompositionMannequin({comparisonData,height=540}){
+    <label>내 몸 투명도 {Math.round((1-myOpacity)*100)}%<input aria-label="내 마네킹 투명도" type="range" min="10" max="90" step="1" value={Math.round((1-myOpacity)*100)} onChange={e=>setMyOpacity(Number(((100-Number(e.target.value))/100).toFixed(2)))}/></label>
+    <label>평균 투명도 {Math.round((1-referenceOpacity)*100)}%<input aria-label="평균 마네킹 투명도" type="range" min="10" max="90" step="1" value={Math.round((1-referenceOpacity)*100)} onChange={e=>setReferenceOpacity(Number(((100-Number(e.target.value))/100).toFixed(2)))}/></label>
+    <label><input type="checkbox" checked={skeleton} onChange={e=>setSkeleton(e.target.checked)}/>골격 구조 보기 (설명용)</label>
+-   <label><input type="checkbox" checked={referenceWireframe} onChange={e=>setReferenceWireframe(e.target.checked)}/>평균 모형 격자선</label>
+-   <label><input type="checkbox" checked={referenceContour} onChange={e=>setReferenceContour(e.target.checked)}/>평균 윤곽선 보기</label>
++   <label><input type="checkbox" checked={referenceWireframe} onChange={e=>setReferenceWireframe(e.target.checked)}/>표준 체형 격자선</label>
++   <label><input type="checkbox" checked={referenceContour} onChange={e=>setReferenceContour(e.target.checked)}/>표준 체형 윤곽선 보기</label>
+   </div></details>
+-  <div className="mannequin-reference-card"><h4>골격근량 · 문헌 평균 비교</h4><p>연구 집단의 MRI 측정 평균입니다. 한국인·동일 연령·인바디 정상 기준이 아니며, 측정 방식이 달라 근육 부족 여부를 판정할 수 없습니다. 겹친 신체는 설명용 모형입니다.</p>{reference.available?<>
+-   <div className="mannequin-mass-comparison"><span>내 측정<strong>{format(m.skeletal_muscle_mass)} <small>kg</small></strong></span><span>문헌 평균<strong>{format(reference.value)} <small>kg</small></strong></span><span>평균과 차이<strong>{signed(reference.differenceKg)} <small>kg</small></strong></span></div>
+-   <p>성인 {profile.gender==='female'?'여성':'남성'} · 연구 전체 468명 · 18–88세 · 전신 MRI</p>
+-   <p className="muted">성별에 따른 연구 평균입니다. 나이·키가 같은 한국인 인바디 평균은 아닙니다. 평균 모형은 내 키·체중·체지방을 유지하고 골격근량만 바꿔 표시합니다.</p>
+-   {!reference.canOverlay&&<p>{reference.overlayReason}</p>}
+-   <details><summary>논문과 수치 출처</summary><p>{reference.study.citation}</p><p>{reference.study.title}</p><p className="muted">{reference.study.verification}</p><p><a href={reference.study.url} target="_blank" rel="noreferrer">PubMed 논문</a> · <a href={reference.study.transcriptionUrl} target="_blank" rel="noreferrer">수치를 확인한 Europe PMC 초록</a></p></details>
++  <div className="mannequin-reference-card"><h4>같은 키·성별 표준 체형 비교</h4><p>{STANDARD_BODY.basis} 겹친 신체는 설명용 모형입니다.</p>{refMeasurement?<>
++   <div className="mannequin-mass-comparison"><span>체중<strong>{format(m.weight)} <small>kg</small></strong><small>표준 {format(reference.weight)} kg</small></span><span>체지방률<strong>{format(m.body_fat_percentage)} <small>%</small></strong><small>표준 {reference.bodyFat}%</small></span><span>골격근량<strong>{format(m.skeletal_muscle_mass)} <small>kg</small></strong><small>표준 {reference.value!=null?`${format(reference.value)} kg`:'—'}</small></span></div>
++   <p>{profile.gender==='female'?'여성':'남성'} · 키 {format(reference.height)} cm 기준 · 별도 입력 없이 자동 생성</p>
++   <p className="muted">표준 체형의 골격근량은 내 측정의 골격근량/제지방량 비율을 표준 제지방량에 적용한 값입니다. 근육 부족이나 비만을 판정하지 않습니다.</p>
++   {reference.muscleReason&&<p>{reference.muscleReason}</p>}
+   </>:<p>{reference.reason} <Link to="/health/profile">프로필 설정</Link></p>}</div>
+   <p className="mannequin-note">체성분 기반 근사 모형입니다. 지방 분포와 얼굴·뼈 모양을 그대로 복원하지는 못합니다. {GIRTH_FIELDS.some(([k])=>Number.isFinite(m[k]))?'입력한 가슴·허리·엉덩이 둘레를 형상에 반영했습니다.':'가슴·허리·엉덩이 둘레를 추가하면 체형을 더 가깝게 맞출 수 있습니다.'}</p>
+  </div>;
+diff --git a/frontend/src/health/components/body3d/MuscleComparisonReadout.jsx b/frontend/src/health/components/body3d/MuscleComparisonReadout.jsx
+index 0d98de8..e8baf0a 100644
+--- a/frontend/src/health/components/body3d/MuscleComparisonReadout.jsx
++++ b/frontend/src/health/components/body3d/MuscleComparisonReadout.jsx
+@@ -4,11 +4,11 @@ export const COMPARISON_OPACITY=Object.freeze({myOpacity:.50,referenceOpacity:.3
+ export default function MuscleComparisonReadout({reference,own}){
+  if(!reference?.available||!Number.isFinite(own))return null;
+  const diff=reference.differenceKg,max=Math.max(own,reference.value,1),format=n=>Number(n.toFixed(2));
+- const description=diff===0?'문헌 평균과 골격근량이 같아요':`문헌 평균보다 ${format(Math.abs(diff))} kg ${diff>0?'많아요':'적어요'}`;
++ const label=reference.label||'문헌 평균',description=diff===0?`${label}과 골격근량이 같아요`:`${label}보다 ${format(Math.abs(diff))} kg ${diff>0?'많아요':'적어요'}`;
+  return <div className="muscle-comparison-readout" aria-label="내 골격근량과 평균의 차이" data-difference={diff>0?'above':diff<0?'below':'equal'}>
+   <strong>{description}</strong>{diff!==0&&<span>비교 기준 대비 {Math.abs(reference.differencePercent)}% {diff>0?'많음':'적음'}</span>}
+   <div className="muscle-comparison-row"><span>내 골격근량</span><div><i style={{width:`${own/max*100}%`}}/></div><b>{format(own)} kg</b></div>
+-  <div className="muscle-comparison-row reference"><span>문헌 평균</span><div><i style={{width:`${reference.value/max*100}%`}}/></div><b>{reference.value} kg</b></div>
++  <div className="muscle-comparison-row reference"><span>{label}</span><div><i style={{width:`${reference.value/max*100}%`}}/></div><b>{reference.value} kg</b></div>
+   <small>전체 골격근량의 차이입니다. 3D 신체는 수치를 반영한 근사 형상이며 부위별 근육량의 실측 차이는 아닙니다.</small>
+  </div>;
+ }
+diff --git a/frontend/src/health/components/body3d/SegmentComparisonReadout.jsx b/frontend/src/health/components/body3d/SegmentComparisonReadout.jsx
+index 40cd653..34ba0d2 100644
+--- a/frontend/src/health/components/body3d/SegmentComparisonReadout.jsx
++++ b/frontend/src/health/components/body3d/SegmentComparisonReadout.jsx
+@@ -17,11 +17,11 @@ export default function SegmentComparisonReadout({selected,focusRegion,compariso
+   {trunkPart&&<p className="segment-comparison-scope">{label}만의 수치가 아닌 몸통 전체 비교입니다.</p>}
+   {result.available?<>
+    <div className="segment-comparison-values"><span>내 측정 <b>{result.own===null?'미입력':`${comparisonNumber(result.own)} kg`}</b></span><span>{result.label} <b>{result.reference===null?'100%':`${result.kind==='report'?'약 ':''}${comparisonNumber(result.reference)} kg`}</b></span></div>
+-   <p className="segment-comparison-source">{result.direction==='equal'?'차이 0%':`${percentText} ${result.direction==='below'?'적음':'많음'}`} · {result.kind==='report'?'결과지 기준(100%)이며 문헌 평균과 다릅니다.':`출처: ${result.source}`}</p>
++   <p className="segment-comparison-source">{result.direction==='equal'?'차이 0%':`${percentText} ${result.direction==='below'?'적음':'많음'}`} · {result.kind==='report'?'결과지 기준(100%)이며 3D 표준 체형과 다릅니다.':`출처: ${result.source}`}</p>
+   </>:<>
+    {result.own!==null&&<p className="segment-comparison-source">내 근육 분석 값 {comparisonNumber(result.own)} kg · 비교 기준 미입력</p>}
+    <p className="segment-comparison-source">{hips?'결과지는 보통 좌우 팔·다리와 몸통 수치를 제공합니다.':'결과지의 ‘부위별 근육 분석’에서 kg와 %를 입력하세요.'}</p>
+-   {total&&<p className="segment-comparison-total">전신 참고 · 골격근량은 문헌 평균{total.differenceKg===0?'과 같아요':`보다 ${comparisonNumber(Math.abs(total.differenceKg))} kg ${total.differenceKg<0?'적어요':'많아요'}`}. (해당 부위 차이 아님)</p>}
++   {total&&<p className="segment-comparison-total">전신 참고 · 골격근량은 {total.label||'문헌 평균'}{total.differenceKg===0?'과 같아요':`보다 ${comparisonNumber(Math.abs(total.differenceKg))} kg ${total.differenceKg<0?'적어요':'많아요'}`}. (해당 부위 차이 아님)</p>}
+    {!hips&&<Link className="segment-comparison-input" to="/health/profile#segment-measurements">부위 수치 입력하기 →</Link>}
+   </>}
+  </section>;
+diff --git a/frontend/src/health/lib/standardBodyReference.js b/frontend/src/health/lib/standardBodyReference.js
+new file mode 100644
+index 0000000..9393bef
+--- /dev/null
++++ b/frontend/src/health/lib/standardBodyReference.js
+@@ -0,0 +1,32 @@
++// Height- and sex-based *standard* body, not a measured population average.
++// Conventions used by Korean clinics and body-composition result sheets:
++//  - standard weight = height(m)² × BMI 22 (male) / 21 (female)
++//  - standard body-fat percentage = 15 % (male) / 23 % (female)
++// Skeletal muscle is not given by these conventions, so the standard body keeps the
++// user's own measured muscle share of fat-free mass and applies it to the standard
++// fat-free mass. Without that measurement no standard muscle value is shown.
++export const STANDARD_BODY=Object.freeze({
++ label:'표준 체형',
++ bmi:{male:22,female:21},
++ bodyFatPercent:{male:15,female:23},
++ basis:'표준체중(키² × BMI 남 22·여 21)과 표준 체지방률(남 15%·여 23%)을 적용한 관례적 기준입니다. 실제 인구 평균이나 건강 판정 기준이 아닙니다.',
++});
++const round=(v,d=1)=>Math.round(v*10**d)/10**d;
++export function standardBodyReference(measurement,profile={}){
++ const gender=profile.gender,height=measurement?.height||profile.height_cm;
++ const missing=[...(!['male','female'].includes(gender)?['성별']:[]),...(!(Number.isFinite(height)&&height>0)?['키']:[])];
++ if(missing.length)return {available:false,missing,label:STANDARD_BODY.label,reason:`프로필에 ${missing.join('·')}을 저장하면 같은 키·성별의 표준 체형을 겹쳐 볼 수 있습니다.`};
++ const weight=round(STANDARD_BODY.bmi[gender]*(height/100)**2),bodyFat=STANDARD_BODY.bodyFatPercent[gender];
++ const leanMass=weight*(1-bodyFat/100);
++ const ownWeight=measurement?.weight,ownFat=measurement?.body_fat_percentage,own=measurement?.skeletal_muscle_mass;
++ const ownLean=Number.isFinite(ownWeight)&&Number.isFinite(ownFat)?ownWeight*(1-ownFat/100):null;
++ const share=Number.isFinite(own)&&ownLean>0&&own<ownLean?own/ownLean:null;
++ const value=share==null?null:round(leanMass*share);
++ const comparable=value!=null;
++ return {available:comparable,canOverlay:true,label:STANDARD_BODY.label,gender,height,weight,bodyFat,value,
++  differenceKg:comparable?round(own-value,2):null,
++  differencePercent:comparable?round((own-value)/value*100):null,
++  muscleReason:comparable?null:'체중·체지방률·골격근량을 입력하면 표준 체형의 골격근량도 비교합니다.',
++  measurement:{measurement_date:measurement?.measurement_date,height,weight,body_fat_percentage:bodyFat,...(comparable?{skeletal_muscle_mass:value}:{}),segments:[]},
++ };
++}
+diff --git a/frontend/src/shared/lib/localApi.js b/frontend/src/shared/lib/localApi.js
+index eaaad8e..a19c8a1 100644
+--- a/frontend/src/shared/lib/localApi.js
++++ b/frontend/src/shared/lib/localApi.js
+@@ -7,6 +7,20 @@ import {LOCAL_ACCOUNT} from './localMode.js';
+ import {ageAt} from '../../health/lib/publishedMuscleReference.js';
+ const segments=['LEFT_ARM','RIGHT_ARM','TRUNK','LEFT_LEG','RIGHT_LEG'];
+ const safety=['safety_chest_pain','safety_fainting','safety_breathlessness','safety_acute_injury','safety_medical_restriction'];
++// Same rules as the server (backend/app/health/exercise_engine.py _limitations): known body parts exclude
++// exercises tagged for that part; unknown or high-risk conditions still require a consultation.
++const limitationWords={knee:['무릎','knee'],back:['허리','디스크','척추','back'],shoulder:['어깨','shoulder'],wrist:['손목','wrist'],hip:['고관절','hip'],ankle:['발목','ankle'],elbow:['팔꿈치','elbow']};
++export function localLimitations(list=[]){
++ const found=new Set();
++ for(const item of list){
++  const text=String(item).trim().toLowerCase();
++  if(!text||text==='없음'||text==='none')continue;
++  const matches=Object.keys(limitationWords).filter(k=>limitationWords[k].some(t=>text.includes(t)));
++  if(!matches.length||['수술','임신','심장','골절','surgery','pregnan','fracture'].some(w=>text.includes(w)))fail('입력한 제약사항은 자동 운동 추천 범위 밖입니다. 건강센터 상담 후 운동계획을 설정하세요.',409);
++  matches.forEach(k=>found.add(k));
++ }
++ return [...found];
++}
+ const now=()=>new Date().toISOString();
+ export const localDate=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
+ const fail=(message,status=422)=>{throw Object.assign(Error(message),{status});};
+@@ -40,15 +54,16 @@ function body(s){
+ export function generateLocalRoutine(s){
+  // Without a measurement we still build a conservative starter plan so a new user is never stuck.
+  const p=s.exercise,m=latest(s)||null,starter=!m,recent=s.workouts.filter(w=>Date.now()-Date.parse(w.date)<7*86400000);
+- if(safety.some(k=>p[k])||p.limitations.length||recent.some(w=>(w.pain??0)>=4||(w.set_records||[]).some(x=>(x.pain??0)>=4)))fail('건강센터 또는 의료전문가와 상담 후 운동계획을 설정하세요.',409);
++ if(safety.some(k=>p[k])||recent.some(w=>(w.pain??0)>=4||(w.set_records||[]).some(x=>(x.pain??0)>=4)))fail('건강센터 또는 의료전문가와 상담 후 운동계획을 설정하세요.',409);
++ const avoid=localLimitations(p.limitations);
+  const height=m?.height||s.profile.height;const bmi=m&&height?m.weight/(height/100)**2:null;
+  const previous=m&&[...s.measurements].filter(x=>x.measurement_date<m.measurement_date).sort((a,b)=>a.measurement_date.localeCompare(b.measurement_date)).at(-1);
+  const muscleDown=previous&&m.skeletal_muscle_mass<previous.skeletal_muscle_mass;
+  const gentle=starter||p.experience_level==='BEGINNER'||(bmi!=null&&bmi<18.5)||muscleDown||recent.some(w=>(w.rpe??0)>=8);
+  const cautious=(bmi!=null&&bmi<18.5)||muscleDown||recent.some(w=>(w.rpe??0)>=8);
+  const fatGoal=p.goal==='FAT_MANAGEMENT'||['fat_loss','weight_loss'].includes(s.goal?.strategy);
+- const {exercises,day_minutes,day_timing,schedule}=balancedLocalDays(p,{gentle,cautious,fatGoal});
+- return {id:secureUUID(),user_id:LOCAL_ACCOUNT,created_at:now(),based_on_measurement_id:m?.id??null,starter,goal:({GENERAL_HEALTH:'기본 체력 관리',GENERAL_FITNESS:'전반적인 체력 향상',MUSCLE_GAIN:'근력·근육량 향상',FAT_MANAGEMENT:'체지방 관리',BALANCE:'균형 있는 움직임'})[p.goal]||'나의 운동 계획',summary:'이 폰에서 생성한 기본 운동 계획입니다. 여러 근력 동작을 먼저 배정하고 남는 시간에 유산소를 더합니다. 준비운동·실제 시범·휴식을 합산한 시간이며, 근력 세션 사이에는 회복일을 두세요.',duration_weeks:4,days_per_week:p.days_per_week,exercises,day_minutes,day_timing,generated_by:'local_rules',algorithm_version:LOCAL_ROUTINE_VERSION,needs_review:false,rationale:[`운동 경험: ${{BEGINNER:'처음 시작',INTERMEDIATE:'꾸준히 운동 중',ADVANCED:'운동 경험이 많음'}[p.experience_level]} · ${{home:'집',gym:'헬스장',outdoor:'실외'}[p.exercise_location]}`,m?`측정 체중 ${m.weight}kg · 골격근량 ${m.skeletal_muscle_mass}kg`:'체성분 측정값이 없어 낮은 부담으로 시작합니다.',muscleDown?'이전보다 낮은 골격근량 기록이 있어 부담을 낮췄습니다. 측정 차이만으로 근력 저하를 진단하지 않습니다.':'근육량만으로 실제 근력·적정 중량을 추정하지 않습니다.'],notices:['개인용 기본 규칙이며 서버의 전체 추천 알고리즘과 다릅니다.','부위별 측정값과 실제 인구 평균은 만들거나 추정하지 않습니다.','통증·어지럼·흉통이 있으면 즉시 중단하세요.'],sources:[{title:'Fitbod · 목표·장비·회복을 고려한 운동 구성',url:'https://fitbod.me/'},{title:'Strong · 사용자 조절 타이머와 운동 기록',url:'https://www.strong.app/'},{title:'Nike Training Club · 단계별 프로그램',url:'https://www.nike.com/ntc-app'}],input_snapshot:{weight_kg:m?.weight??null,muscle_kg:m?.skeletal_muscle_mass??null,body_fat_percent:m?.body_fat_percentage??null,profile:structuredClone(p)},schedule,progression:gentle?'적은 세트부터 시작하고 통증과 수행 부담을 기록하세요.':'실제 수행 기록을 확인한 뒤 재생성하세요. 중량은 자동으로 올리지 않습니다.'};
++ const {exercises,day_minutes,day_timing,schedule}=balancedLocalDays(p,{gentle,cautious,fatGoal,avoid});
++ return {id:secureUUID(),user_id:LOCAL_ACCOUNT,created_at:now(),based_on_measurement_id:m?.id??null,starter,goal:({GENERAL_HEALTH:'기본 체력 관리',GENERAL_FITNESS:'전반적인 체력 향상',MUSCLE_GAIN:'근력·근육량 향상',FAT_MANAGEMENT:'체지방 관리',BALANCE:'균형 있는 움직임'})[p.goal]||'나의 운동 계획',summary:'이 폰에서 생성한 기본 운동 계획입니다. 여러 근력 동작을 먼저 배정하고 남는 시간에 유산소를 더합니다. 준비운동·실제 시범·휴식을 합산한 시간이며, 근력 세션 사이에는 회복일을 두세요.',duration_weeks:4,days_per_week:p.days_per_week,exercises,day_minutes,day_timing,generated_by:'local_rules',algorithm_version:LOCAL_ROUTINE_VERSION,needs_review:false,rationale:[`운동 경험: ${{BEGINNER:'처음 시작',INTERMEDIATE:'꾸준히 운동 중',ADVANCED:'운동 경험이 많음'}[p.experience_level]} · ${{home:'집',gym:'헬스장',outdoor:'실외'}[p.exercise_location]}`,m?`측정 체중 ${m.weight}kg · 골격근량 ${m.skeletal_muscle_mass}kg`:'체성분 측정값이 없어 낮은 부담으로 시작합니다.',muscleDown?'이전보다 낮은 골격근량 기록이 있어 부담을 낮췄습니다. 측정 차이만으로 근력 저하를 진단하지 않습니다.':'근육량만으로 실제 근력·적정 중량을 추정하지 않습니다.'],notices:['개인용 기본 규칙이며 서버의 전체 추천 알고리즘과 다릅니다.','부위별 측정값과 실제 인구 평균은 만들거나 추정하지 않습니다.','통증·어지럼·흉통이 있으면 즉시 중단하세요.',...(avoid.length?['제약 부위에 부담을 줄 수 있는 동작을 제외했습니다. 제외되지 않은 동작도 통증이 있으면 중단하세요.']:[])],sources:[{title:'Fitbod · 목표·장비·회복을 고려한 운동 구성',url:'https://fitbod.me/'},{title:'Strong · 사용자 조절 타이머와 운동 기록',url:'https://www.strong.app/'},{title:'Nike Training Club · 단계별 프로그램',url:'https://www.nike.com/ntc-app'}],input_snapshot:{weight_kg:m?.weight??null,muscle_kg:m?.skeletal_muscle_mass??null,body_fat_percent:m?.body_fat_percentage??null,profile:structuredClone(p)},schedule,progression:gentle?'적은 세트부터 시작하고 통증과 수행 부담을 기록하세요.':'실제 수행 기록을 확인한 뒤 재생성하세요. 중량은 자동으로 올리지 않습니다.'};
+ }
+ let chain=Promise.resolve();
+ function restoredDocument(backup){
+diff --git a/frontend/src/shared/lib/localRoutinePlan.js b/frontend/src/shared/lib/localRoutinePlan.js
+index 4d1b36b..c7ab0ec 100644
+--- a/frontend/src/shared/lib/localRoutinePlan.js
++++ b/frontend/src/shared/lib/localRoutinePlan.js
+@@ -7,8 +7,8 @@ const preferred=['sit_stand','wall_push','scapular','bridge','dead_bug','walk'];
+ const weekdays={1:[1],2:[1,4],3:[1,3,5],4:[1,2,4,6],5:[1,2,3,5,6],6:[1,2,3,4,5,6],7:[1,2,3,4,5,6,7]};
+ const strengthSlots={1:[0],2:[0,1],3:[0,1,2],4:[0,2,3],5:[0,2,4],6:[0,2,4],7:[0,2,4]};
+ const seconds=exercises=>Math.ceil(buildTempoPlan(exercises).reduce((sum,s)=>sum+s.durationMs,0)/1000);
+-export function balancedLocalDays(profile,{gentle=false,cautious=false,fatGoal=false}={}){
+- const allowed=catalog.filter(x=>x.auto_recommend!==false&&x.difficulty!=='advanced'&&x.locations.includes(profile.exercise_location)&&x.equipment.every(k=>profile.available_equipment.includes(k))&&(profile.training_mode!=='bodyweight'||!x.equipment.length));
++export function balancedLocalDays(profile,{gentle=false,cautious=false,fatGoal=false,avoid=[]}={}){
++ const allowed=catalog.filter(x=>x.auto_recommend!==false&&x.difficulty!=='advanced'&&x.locations.includes(profile.exercise_location)&&x.equipment.every(k=>profile.available_equipment.includes(k))&&(profile.training_mode!=='bodyweight'||!x.equipment.length)&&!(x.avoid||[]).some(k=>avoid.includes(k)));
+  const pick=(pattern,variation=0)=>{
+   let candidates=allowed.filter(x=>x.pattern===pattern);
+   if(gentle&&candidates.some(x=>x.easy))candidates=candidates.filter(x=>x.easy);
+@@ -27,7 +27,8 @@ export function balancedLocalDays(profile,{gentle=false,cautious=false,fatGoal=f
+   let moves;
+   if(strength){
+    moves=patterns.map(pattern=>pick(pattern,variation)).filter(Boolean).map(x=>exercise(x,day));
+-   if(moves.length<4)throw Error('현재 장소·장비로 균형 잡힌 루틴을 만들 수 없습니다. 운동 조건을 확인하세요.');
++   // A limitation may remove whole patterns (e.g. back excludes every hinge); keep the remaining safe ones.
++   if(moves.length<(avoid.length?2:4))throw Object.assign(Error(avoid.length?'현재 운동환경과 제약사항으로 구성할 수 있는 운동이 부족합니다. 건강센터 상담이 필요합니다.':'현재 장소·장비로 균형 잡힌 루틴을 만들 수 없습니다. 운동 조건을 확인하세요.'),{status:409});
+    // All movement patterns get a first set before any exercise gets extra volume.
+    const maxSets=cautious?1:profile.experience_level==='BEGINNER'?2:profile.experience_level==='ADVANCED'?4:3;
+    if(seconds(moves)>limit){moves=moves.map(x=>({...x,reps:'4',hold_seconds:15}));}
+diff --git a/frontend/tests/CompositionMannequin.test.jsx b/frontend/tests/CompositionMannequin.test.jsx
+index c91c17f..75117a9 100644
+--- a/frontend/tests/CompositionMannequin.test.jsx
++++ b/frontend/tests/CompositionMannequin.test.jsx
+@@ -4,6 +4,7 @@ import {render,screen,fireEvent} from '@testing-library/react';
+ import userEvent from '@testing-library/user-event';
+ import {MemoryRouter} from 'react-router-dom';
+ import {MUSCLE_STUDY,ageAt,publishedMuscleReference} from '../src/health/lib/publishedMuscleReference.js';
++import {standardBodyReference} from '../src/health/lib/standardBodyReference.js';
+ import {mannequinBase,mannequinPositions,referenceMannequinMeasurement,torsoCircumference,GIRTH_FIELDS} from '../src/health/components/body3d/mannequinMath.js';
+ const {scene}=vi.hoisted(()=>({scene:vi.fn()}));
+ vi.mock('../src/health/components/body3d/BodyScene.jsx',()=>({default:p=>{scene(p);return <div>마네킹 뷰어</div>;}}));
+@@ -38,19 +39,31 @@ it('fits measured torso perimeters without moving the pose or inventing regional
+  // Bone and mineral totals are displayed/stored, never used to guess bone anatomy.
+  expect(mannequinPositions(mannequinBase('male'),{...m,bone_mass:3,mineral_mass:3.5},profile)).toEqual(shaped);
+ });
+-it('shows provenance and composition, toggles actual layers, and keeps own body without eligible mean',async()=>{
+- const user=userEvent.setup();const view=render(<MemoryRouter><CompositionMannequin comparisonData={{measurement,body_profile:profile}}/></MemoryRouter>);
+- expect(screen.getByText('골격근량')).toBeTruthy();expect(screen.getByText(/전신 MRI/)).toBeTruthy();expect(scene.mock.lastCall[0].mannequin.referenceMeasurement.skeletal_muscle_mass).toBe(33);
++it('builds a same-height, same-sex standard body with no extra input',()=>{
++ const r=standardBodyReference(measurement,{gender:'male'});
++ expect(r).toMatchObject({available:true,canOverlay:true,height:178,weight:69.7,bodyFat:15,value:29.6,differenceKg:.4});
++ expect(r.measurement).toMatchObject({height:178,weight:69.7,body_fat_percentage:15,skeletal_muscle_mass:29.6,segments:[]});
++ for(const [key] of GIRTH_FIELDS)expect(r.measurement[key]).toBeUndefined();
++ const f=standardBodyReference({...measurement,height:160},{gender:'female'});expect(f).toMatchObject({weight:53.8,bodyFat:23});
++ expect(standardBodyReference({measurement_date:'2026-10-08'},{gender:'male',height_cm:170})).toMatchObject({available:false,canOverlay:true,weight:63.6,value:null});
++ expect(standardBodyReference(measurement,{gender:'unspecified'})).toMatchObject({available:false,missing:['성별']});
++ expect(standardBodyReference({...measurement,height:null},{gender:'male'})).toMatchObject({available:false,missing:['키']});
++});
++it('overlays the standard body without birth date and toggles actual layers',async()=>{
++ const user=userEvent.setup();const view=render(<MemoryRouter><CompositionMannequin comparisonData={{measurement,body_profile:{gender:'male'}}}/></MemoryRouter>);
++ expect(scene.mock.lastCall[0].mannequin.referenceMeasurement).toMatchObject({height:178,weight:69.7,body_fat_percentage:15,skeletal_muscle_mass:29.6});
++ expect(scene.mock.lastCall[0].mannequin.referenceLabel).toBe('표준 체형');
++ expect(screen.queryByRole('link',{name:/평균 모형에 필요한 정보 입력/})).toBeNull();
+  expect(screen.getByRole('button',{name:'겹쳐보기',exact:true}).getAttribute('aria-pressed')).toBe('true');
+  expect(scene.mock.lastCall[0].mannequin.options).toMatchObject({layout:'overlap',showMy:true,showReference:true,myOpacity:.50,referenceOpacity:.30,referenceContour:true});
+- expect(screen.getByText(/키·발 위치를 맞춰 같은 자리에/)).toBeTruthy();
++ expect(screen.getByText(/키·발 위치를 맞춰 같은 자리에/)).toBeTruthy();expect(screen.getByText(/별도 입력 없이 자동 생성/)).toBeTruthy();
+  await user.click(screen.getByRole('button',{name:'내 몸만',exact:true}));expect(scene.mock.lastCall[0].mannequin.options.showReference).toBe(false);
+  await user.click(screen.getByText('투명도 · 골격 · 표현 설정'));await user.click(screen.getByRole('checkbox',{name:/골격 구조 보기/}));expect(scene.mock.lastCall[0].mannequin.options.skeleton).toBe(true);
+  view.rerender(<MemoryRouter><CompositionMannequin comparisonData={{measurement,body_profile:{gender:'unspecified'}}}/></MemoryRouter>);
+- expect(scene.mock.lastCall[0].mannequin.referenceMeasurement).toBeNull();expect(scene.mock.lastCall[0].mannequin.options.showMy).toBe(true);expect(screen.queryByText('33')).toBeNull();
++ expect(scene.mock.lastCall[0].mannequin.referenceMeasurement).toBeNull();expect(scene.mock.lastCall[0].mannequin.options.showMy).toBe(true);
+  expect(screen.getByRole('button',{name:'나란히 비교',exact:true}).disabled).toBe(true);
+- expect(screen.getByRole('link',{name:'평균 모형에 필요한 정보 입력'}).getAttribute('href')).toBe('/health/profile');
+- expect(screen.getByRole('status').textContent).toContain('성별 · 생년월일');
++ expect(screen.getByRole('link',{name:'프로필에서 성별 설정'}).getAttribute('href')).toBe('/health/profile');
++ expect(screen.getAllByRole('status').find(s=>s.className==='mannequin-reference-setup').textContent).not.toContain('생년월일');
+ });
+ it('higher displayed transparency makes both actual materials less opaque',async()=>{
+  const user=userEvent.setup();render(<MemoryRouter><CompositionMannequin comparisonData={{measurement,body_profile:profile}}/></MemoryRouter>);
+@@ -58,30 +71,17 @@ it('higher displayed transparency makes both actual materials less opaque',async
+  expect(screen.getByLabelText('내 마네킹 투명도').value).toBe('50');expect(screen.getByLabelText('평균 마네킹 투명도').value).toBe('70');
+  fireEvent.change(screen.getByLabelText('내 마네킹 투명도'),{target:{value:'80'}});fireEvent.change(screen.getByLabelText('평균 마네킹 투명도'),{target:{value:'75'}});
+  expect(scene.mock.lastCall[0].mannequin.options).toMatchObject({myOpacity:.2,referenceOpacity:.25});
+- expect(screen.getByText('내 몸 투명도 80%')).toBeTruthy();
+- await user.click(screen.getByRole('button',{name:'겹쳐보기',exact:true}));expect(scene.mock.lastCall[0].mannequin.options).toMatchObject({layout:'overlap',showMy:true,showReference:true});
+- await user.click(screen.getByRole('checkbox',{name:'평균 윤곽선 보기'}));expect(scene.mock.lastCall[0].mannequin.options.referenceContour).toBe(false);
++ await user.click(screen.getByRole('checkbox',{name:'표준 체형 윤곽선 보기'}));expect(scene.mock.lastCall[0].mannequin.options.referenceContour).toBe(false);
+  await user.click(screen.getByRole('button',{name:'나란히 비교',exact:true}));expect(scene.mock.lastCall[0].mannequin.options.layout).toBe('side-by-side');
+- await user.click(screen.getByRole('button',{name:'평균 비교 모형',exact:true}));expect(scene.mock.lastCall[0].mannequin.options).toMatchObject({showMy:false,showReference:true});
+- expect(screen.queryByText('내 체성분 · 30 kg')).toBeNull();expect(screen.getByText('문헌 평균 · 33 kg')).toBeTruthy();
++ await user.click(screen.getByRole('button',{name:'표준 체형 모형',exact:true}));expect(scene.mock.lastCall[0].mannequin.options).toMatchObject({showMy:false,showReference:true});
++ expect(screen.queryByText('내 체성분 · 30 kg')).toBeNull();expect(screen.getByText('표준 체형 · 29.6 kg')).toBeTruthy();
+ });
+-it('clearly describes greater, smaller and equal total muscle without inventing regional measurements',()=>{
++it('describes muscle against the standard body and still overlays when muscle cannot be compared',()=>{
+  const view=render(<MemoryRouter><CompositionMannequin comparisonData={{measurement,body_profile:profile}}/></MemoryRouter>);
+- expect(screen.getByText('문헌 평균보다 3 kg 적어요')).toBeTruthy();
+- view.rerender(<MemoryRouter><CompositionMannequin comparisonData={{measurement:{...measurement,skeletal_muscle_mass:36},body_profile:profile}}/></MemoryRouter>);
+- expect(screen.getByText('문헌 평균보다 3 kg 많아요')).toBeTruthy();
+- view.rerender(<MemoryRouter><CompositionMannequin comparisonData={{measurement:{...measurement,skeletal_muscle_mass:33},body_profile:profile}}/></MemoryRouter>);
+- expect(screen.getByText('문헌 평균과 골격근량이 같아요')).toBeTruthy();
+-});
+-it('explains incompatible reference composition above the viewer and never invents a full average record',()=>{
+- render(<MemoryRouter><CompositionMannequin comparisonData={{measurement:{...measurement,weight:30},body_profile:profile}}/></MemoryRouter>);
+- expect(scene.mock.lastCall[0].mannequin.referenceMeasurement).toBeNull();expect(scene.mock.lastCall[0].mannequin.options.showMy).toBe(true);
+- expect(screen.getByRole('status').textContent).toContain('현재 체중·체지방 조건');
+- expect(screen.getByRole('button',{name:'평균 비교 모형',exact:true}).disabled).toBe(true);
+- expect(screen.queryByRole('link',{name:'평균 모형에 필요한 정보 입력'})).toBeNull();
+-});
+-it('keeps the study age restriction clear even when other body inputs are missing',()=>{
+- render(<MemoryRouter><CompositionMannequin comparisonData={{measurement:{...measurement,body_fat_percentage:null},body_profile:{...profile,birth_date:'2015-01-01'}}}/></MemoryRouter>);
+- expect(screen.getAllByRole('status').find(s=>s.className==='mannequin-reference-setup').textContent).toContain('18–88세');
+- expect(screen.queryByRole('link',{name:'평균 모형에 필요한 정보 입력'})).toBeNull();expect(scene.mock.lastCall[0].mannequin.referenceMeasurement).toBeNull();
++ expect(screen.getByText('표준 체형보다 0.4 kg 많아요')).toBeTruthy();
++ view.rerender(<MemoryRouter><CompositionMannequin comparisonData={{measurement:{...measurement,body_fat_percentage:null},body_profile:profile}}/></MemoryRouter>);
++ expect(scene.mock.lastCall[0].mannequin.referenceMeasurement).toMatchObject({weight:69.7,body_fat_percentage:15});
++ expect(scene.mock.lastCall[0].mannequin.referenceMeasurement.skeletal_muscle_mass).toBeUndefined();
++ expect(screen.getByText(/표준 체형의 골격근량도 비교합니다/)).toBeTruthy();
++ expect(screen.getByRole('button',{name:'표준 체형 모형',exact:true}).disabled).toBe(false);
+ });
+diff --git a/frontend/tests/LocalApi.test.js b/frontend/tests/LocalApi.test.js
+index cb3b378..93b4d37 100644
+--- a/frontend/tests/LocalApi.test.js
++++ b/frontend/tests/LocalApi.test.js
+@@ -66,3 +66,20 @@ it('requires regenerating legacy routines without losing health or workout recor
+  expect(next).toMatchObject({algorithm_version:'device-balanced-v2',needs_review:false});
+  expect((await localApi('/api/body-composition/latest')).weight).toBe(60);
+ });
++it('builds a routine around known limitations like the server and blocks only out-of-scope ones',async()=>{
++ const catalog=(await import('../src/shared/lib/localCatalog.json')).default;
++ await localApi('/api/body-composition',measurement);
++ for(const [text,part] of [['무릎 통증','knee'],['허리 디스크','back'],['어깨','shoulder']]){
++  await localApi('/api/exercise-profile',{limitations:[text]},{method:'PUT'});
++  const r=await localApi('/api/exercise-routines/generate',{});
++  expect(r.exercises.length).toBeGreaterThan(0);
++  expect(r.exercises.every(e=>!catalog.find(c=>c.id===e.motion_id).avoid.includes(part))).toBe(true);
++  expect(r.notices.some(n=>n.includes('제약 부위'))).toBe(true);
++ }
++ await localApi('/api/exercise-profile',{limitations:['없음']},{method:'PUT'});
++ expect((await localApi('/api/exercise-routines/generate',{})).notices.some(n=>n.includes('제약 부위'))).toBe(false);
++ for(const text of ['무릎 수술 후 재활','심장 질환','잘 모르겠음']){
++  await localApi('/api/exercise-profile',{limitations:[text]},{method:'PUT'});
++  await expect(localApi('/api/exercise-routines/generate',{})).rejects.toMatchObject({status:409});
++ }
++});
+diff --git a/frontend/tests/LocalRoutinePlan.test.js b/frontend/tests/LocalRoutinePlan.test.js
+index 0ac09ea..4a205ce 100644
+--- a/frontend/tests/LocalRoutinePlan.test.js
++++ b/frontend/tests/LocalRoutinePlan.test.js
+@@ -36,3 +36,13 @@ describe('balanced device routines',()=>{
+   expect(buildTempoPlan([{motion_id:'walk',duration:'10분'}]).reduce((s,x)=>s+x.durationMs,0)).toBe(605000);
+  });
+ });
++
++describe('limitations in device routines',()=>{
++ it('keeps every setting buildable while excluding each limited part',()=>{
++  for(const part of ['knee','back','shoulder','wrist','hip','ankle','elbow'])for(const days_per_week of [1,3,5,7])for(const minutes_per_session of [10,30])for(const exercise_location of ['home','gym','outdoor']){
++   const result=balancedLocalDays({...base,days_per_week,minutes_per_session,exercise_location},{gentle:true,avoid:[part]});
++   expect(result.exercises.length).toBeGreaterThan(0);
++   expect(result.exercises.every(e=>!catalog.find(c=>c.id===e.motion_id).avoid.includes(part))).toBe(true);
++  }
++ });
++});
+diff --git a/frontend/tests/SegmentComparisonReadout.test.jsx b/frontend/tests/SegmentComparisonReadout.test.jsx
+index 2337721..48f3200 100644
+--- a/frontend/tests/SegmentComparisonReadout.test.jsx
++++ b/frontend/tests/SegmentComparisonReadout.test.jsx
+@@ -31,7 +31,7 @@ it('uses a sourced selected cohort mean, rejects demo means, and keeps tiny nonz
+ it('shows a large regional result with its source and missing-data instructions without relabeling total muscle',()=>{
+  const view=render(<MemoryRouter><SegmentComparisonReadout selected="LEFT_ARM" focusRegion="left_arm" comparisonData={data(2.7,90)}/></MemoryRouter>);
+  const card=screen.getByRole('status',{name:'선택 부위 수치 비교'});
+- expect(within(card).getByText('왼팔 선택')).toBeTruthy();expect(card.textContent).toContain('결과지 기준보다 0.3 kg 적어요');expect(card.textContent).toContain('문헌 평균과 다릅니다');
++ expect(within(card).getByText('왼팔 선택')).toBeTruthy();expect(card.textContent).toContain('결과지 기준보다 0.3 kg 적어요');expect(card.textContent).toContain('3D 표준 체형과 다릅니다');
+  view.rerender(<MemoryRouter><SegmentComparisonReadout selected="RIGHT_ARM" focusRegion="right_arm" comparisonData={data(2.7,90)} totalReference={{available:true,differenceKg:-3}}/></MemoryRouter>);
+  expect(card.textContent).toContain('부위 비교 정보가 필요해요');expect(card.textContent).toContain('해당 부위 차이 아님');expect(card.textContent).not.toContain('0.3 kg 적어요');
+  expect(within(card).getByRole('link',{name:/부위 수치 입력/}).getAttribute('href')).toBe('/health/profile#segment-measurements');
+-- 
+2.43.0
+

@@ -1,0 +1,268 @@
+From 8fb2af521938a37832f9bdcecb3a122b3195c10d Mon Sep 17 00:00:00 2001
+From: ksg <sisungaa851@gmail.com>
+Date: Sun, 1 Nov 2026 00:21:36 +0900
+Subject: [PATCH] Add tiered render quality pipeline for exercise 3D scenes
+
+Capable desktops render with MSAA, ambient occlusion and a supersampled
+still frame once the scene settles; software and weak GPUs keep the
+lightweight path.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../components/exercise/ExerciseMotion3D.jsx  |  14 ++-
+ .../components/exercise/QualityPipeline.jsx   | 110 ++++++++++++++++++
+ .../components/exercise/renderQuality.js      |  37 ++++++
+ frontend/tests/RenderQuality.test.js          |  26 +++++
+ 4 files changed, 182 insertions(+), 5 deletions(-)
+ create mode 100644 frontend/src/health/components/exercise/QualityPipeline.jsx
+ create mode 100644 frontend/src/health/components/exercise/renderQuality.js
+ create mode 100644 frontend/tests/RenderQuality.test.js
+
+diff --git a/frontend/src/health/components/exercise/ExerciseMotion3D.jsx b/frontend/src/health/components/exercise/ExerciseMotion3D.jsx
+index 2e02a89..7aff16a 100644
+--- a/frontend/src/health/components/exercise/ExerciseMotion3D.jsx
++++ b/frontend/src/health/components/exercise/ExerciseMotion3D.jsx
+@@ -18,6 +18,8 @@ import Footwear from '../body3d/Footwear.jsx';
+ import { exerciseAvatarGeometry, exerciseMaterials } from './exerciseAppearance.js';
+ import ExerciseEquipment from './ExerciseEquipment.jsx';
+ import { exerciseCameraPreset } from './exerciseCamera.js';
++import QualityPipeline from './QualityPipeline.jsx';
++import { detectRenderQuality, forcedRenderQuality, refineRenderQuality, renderSettings, usesQualityPipeline } from './renderQuality.js';
+ import {prepareAthlete,getGripSurface,exerciseShoeFloor} from './athleteModel.js';
+ import { exerciseHandShape } from './handPoses.js';
+ import { morphParameters } from '../body3d/morph.js';
+@@ -174,17 +176,17 @@ function TrainingMat({ heightScale }) {
+   </mesh>;
+ }
+ 
+-function Studio({ compact, heightScale, motion, portrait=false }) {
++function Studio({ compact, heightScale, motion, portrait=false, shadowMap=1024 }) {
+   const floor = FLOOR_MOTIONS.test(motion) || FLOOR_STRETCHES.has(motion) || MOTIONS[motion]?.prop === 'mat';
+   return <>
+     <StudioEnvironment portrait={portrait}/>
+     <color attach="background" args={['#f7faff']}/>
+     <fog attach="fog" args={['#f7faff', 5, 11]}/>
+     <hemisphereLight args={['#fffaf6', '#c4cedb', portrait?.42:.45]}/>
+-    <directionalLight position={portrait?[-2,3,4]:[-3,5,4]} color="#fff8f1" intensity={portrait?1.20:1.7} castShadow={!compact} shadow-mapSize={[1024, 1024]} shadow-camera-left={-2} shadow-camera-right={2} shadow-camera-top={2.6} shadow-camera-bottom={-1.3} shadow-bias={-.0003} shadow-normalBias={.012} shadow-radius={4}/>
++    <directionalLight position={portrait?[-2,3,4]:[-3,5,4]} color="#fff8f1" intensity={portrait?1.20:1.7} castShadow={!compact} shadow-mapSize={[shadowMap, shadowMap]} shadow-camera-left={-2} shadow-camera-right={2} shadow-camera-top={2.6} shadow-camera-bottom={-1.3} shadow-bias={-.0003} shadow-normalBias={.012} shadow-radius={4}/>
+     <directionalLight position={[3, 2, 2]} color="#e4efff" intensity={portrait?.50:.65}/>
+     <directionalLight position={[1, 3, -3]} color="#edf3ff" intensity={.85}/>
+-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -.021, 0]}><planeGeometry args={[30, 30]}/><meshStandardMaterial color="#eff4fb" roughness={.95}/></mesh>
++    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -.021, 0]} userData={{ noAO: true }}><planeGeometry args={[30, 30]}/><meshStandardMaterial color="#eff4fb" roughness={.95}/></mesh>
+     {floor && <TrainingMat heightScale={heightScale}/>}
+     {compact ? <SoftFloorShadow floor={floor} heightScale={heightScale}/> : <ContactShadows position={[0, floor ? .001 : -.019, 0]} opacity={.29} scale={4} blur={2.3} far={2} resolution={512}/>}
+   </>;
+@@ -224,6 +226,8 @@ export default function ExerciseMotion3D({ motion, progress, mirror, measurement
+   const initialView = defaultView || (FLOOR_MOTIONS.test(motion) ? 'side' : '45');
+   const [view, setView] = useState(initialView);
+   const [appearance, setAppearance] = useState('athlete');
++  const [quality, setQuality] = useState(() => detectRenderQuality());
++  const render = useMemo(() => renderSettings(quality, { compact, devicePixelRatio: globalThis.devicePixelRatio || 1 }), [quality, compact]);
+   const anatomy = mannequinGuide(motion);
+   useEffect(() => setView(initialView), [motion, initialView,faceFocus]);
+   // The instructor has a consistent demonstration build. Personal body
+@@ -243,8 +247,8 @@ export default function ExerciseMotion3D({ motion, progress, mirror, measurement
+       <button type="button" className="btn btn-ghost" aria-label="오른쪽으로 회전" onClick={() => rotateView(controls, 1)}>회전 <RotateCw size={16}/></button>
+     </div>}
+     <div className="motion-3d-canvas" style={{ position: 'relative', height: compact ? undefined : 340, flex: compact ? '1 1 0' : undefined, minHeight: compact ? 0 : undefined, touchAction: 'none' }}>
+-      <SceneBoundary motion={motion} fallback={fallback}><React.Suspense fallback={<p className="motion-loading" role="status">캐릭터를 준비하고 있습니다.</p>}><Canvas shadows={!compact} dpr={[1, compact ? 1.5 : 2]} frameloop="demand" gl={{ antialias: true, alpha: true, powerPreference: 'low-power' }} camera={{ position: [3, 1.5, 3], fov: 36 }} fallback={fallback} aria-label={appearance === 'mannequin' ? '운동 부위를 강조한 3D 운동 시범' : '운동복을 입은 3D 운동 시범'}>
+-        <SceneCamera motion={motion} view={view} mirror={mirror} heightScale={heightScale} controls={controls} faceFocus={faceFocus}/><Studio compact={compact} heightScale={heightScale} motion={motion} portrait={faceFocus}/>
++      <SceneBoundary motion={motion} fallback={fallback}><React.Suspense fallback={<p className="motion-loading" role="status">캐릭터를 준비하고 있습니다.</p>}><Canvas shadows={!compact} dpr={render.dpr} frameloop="demand" gl={{ antialias: true, alpha: true, powerPreference: render.powerPreference }} onCreated={({ gl }) => { if (forcedRenderQuality()) return; const ctx = gl.getContext(), info = ctx.getExtension('WEBGL_debug_renderer_info'); setQuality(tier => refineRenderQuality(tier, String(ctx.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : ctx.RENDERER) || ''))); }} camera={{ position: [3, 1.5, 3], fov: 36 }} fallback={fallback} aria-label={appearance === 'mannequin' ? '운동 부위를 강조한 3D 운동 시범' : '운동복을 입은 3D 운동 시범'}>
++        <SceneCamera motion={motion} view={view} mirror={mirror} heightScale={heightScale} controls={controls} faceFocus={faceFocus}/><Studio compact={compact} heightScale={heightScale} motion={motion} portrait={faceFocus} shadowMap={render.shadowMap}/>{usesQualityPipeline(render) && <QualityPipeline settings={render} portrait={faceFocus}/>}
+         <Athlete {...{ motion, progress, mirror, compact, appearance, onReady, character, highlight }} measurement={m} profile={p}/>
+         <OrbitControls ref={controls} enabled={view === 'free' || !angleControls} enablePan={false} minDistance={(faceFocus ? .38 : 1.2) * heightScale} maxDistance={(faceFocus ? .95 : 6) * heightScale} maxPolarAngle={Math.PI / 2 - .02}/>
+       </Canvas></React.Suspense></SceneBoundary>
+diff --git a/frontend/src/health/components/exercise/QualityPipeline.jsx b/frontend/src/health/components/exercise/QualityPipeline.jsx
+new file mode 100644
+index 0000000..0bdaf2c
+--- /dev/null
++++ b/frontend/src/health/components/exercise/QualityPipeline.jsx
+@@ -0,0 +1,110 @@
++import { useEffect, useMemo, useRef } from 'react';
++import { useFrame, useThree } from '@react-three/fiber';
++import * as THREE from 'three';
++import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
++import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
++import { SSAARenderPass } from 'three/examples/jsm/postprocessing/SSAARenderPass.js';
++import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
++import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
++
++// Delay before the settled scene is re-rendered with jittered supersampling.
++export const REFINE_DELAY_MS = 160;
++
++const cutoutOrTransparent = material => material && (material.alphaTest > 0 || material.transparent);
++
++// GTAO's normal pass ignores alphaTest, so hair cards would occlude as solid
++// quads and stamp dark rectangles over the face. Hair, face overlays, the
++// contact shadow and other see-through meshes therefore stay out of the AO
++// G-buffer; the AO comes from the opaque head and body beneath them.
++// Meshes tagged userData.noAO (the 30 m studio floor, whose grazing far depth
++// greys out the horizon) are skipped too; ContactShadows grounds the feet.
++class SurfaceGTAOPass extends GTAOPass {
++  _overrideVisibility() {
++    super._overrideVisibility();
++    const cache = this._visibilityCache;
++    this.scene.traverse(object => {
++      if (object.isMesh && object.visible && (object.userData.noAO || [].concat(object.material).some(cutoutOrTransparent))) { object.visible = false; cache.push(object); }
++    });
++  }
++}
++
++// three only tone maps (and fogs after tone mapping) when drawing to the
++// canvas. Rendering the scene into a linear target and tone mapping in
++// OutputPass therefore shifts every fogged pixel (the studio floor turned flat
++// grey), and blending the eye layers in linear space greys the iris. Marking
++// the targets display-referred makes materials tone map and sRGB-encode exactly
++// as on the canvas, so blending matches and OutputPass becomes a plain copy.
++function displayReferred(target) {
++  target.isXRRenderTarget = true;
++  target.texture.colorSpace = THREE.SRGBColorSpace;
++  return target;
++}
++
++class DisplayOutputPass extends OutputPass {
++  render(renderer, ...rest) {
++    const { toneMapping, outputColorSpace } = renderer;
++    renderer.toneMapping = THREE.NoToneMapping;
++    renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
++    try { super.render(renderer, ...rest); } finally { renderer.toneMapping = toneMapping; renderer.outputColorSpace = outputColorSpace; }
++  }
++}
++
++export default function QualityPipeline({ settings, portrait = false }) {
++  const { gl, scene, camera, size, viewport, invalidate } = useThree();
++  const refine = useRef({ pending: false, timer: 0 });
++  const pipeline = useMemo(() => {
++    const target = displayReferred(new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: settings.msaa }));
++    const composer = new EffectComposer(gl, target);
++    displayReferred(composer.renderTarget2);
++    const base = new RenderPass(scene, camera);
++    const supersample = new SSAARenderPass(scene, camera);
++    supersample.sampleLevel = settings.refineSamples;
++    // Created eagerly (the pass would lazily make a scene-referred, single-sample
++    // one; without MSAA, alpha-to-coverage hair edges leave a bright fringe).
++    supersample._sampleRenderTarget = displayReferred(new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: settings.msaa }));
++    supersample.enabled = false;
++    composer.addPass(base);
++    composer.addPass(supersample);
++    if (settings.ao) {
++      const ao = new SurfaceGTAOPass(scene, camera, 1, 1);
++      // Metric scene: a tight radius keeps close-up AO in creases (eyes, nostrils, ears) instead of haloing the head.
++      ao.blendIntensity = portrait ? .55 : .7;
++      ao.updateGtaoMaterial({ radius: portrait ? .05 : .2, distanceExponent: 1.5, thickness: portrait ? .03 : .2, scale: 1, samples: 16 });
++      ao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 16 });
++      composer.addPass(ao);
++    }
++    composer.addPass(new DisplayOutputPass());
++    return { composer, base, supersample, target };
++  }, [gl, scene, camera, settings, portrait]);
++
++  useEffect(() => {
++    pipeline.composer.setPixelRatio(viewport.dpr);
++    pipeline.composer.setSize(size.width, size.height);
++    invalidate();
++  }, [pipeline, size.width, size.height, viewport.dpr, invalidate]);
++
++  useEffect(() => {
++    const state = refine.current;
++    return () => {
++      clearTimeout(state.timer);
++      for (const pass of pipeline.composer.passes) pass.dispose?.();
++      pipeline.composer.dispose();
++      pipeline.target.dispose();
++    };
++  }, [pipeline]);
++
++  // Priority 1 hands rendering to the composer. Interactive frames stay cheap;
++  // once nothing has invalidated for REFINE_DELAY_MS the still frame is
++  // replaced by a 2^refineSamples jittered average.
++  useFrame((_, delta) => {
++    const state = refine.current, refining = state.pending && settings.refineSamples > 0;
++    state.pending = false;
++    clearTimeout(state.timer);
++    pipeline.base.enabled = !refining;
++    pipeline.supersample.enabled = refining;
++    pipeline.composer.render(delta);
++    if (!refining && settings.refineSamples > 0) state.timer = setTimeout(() => { state.pending = true; invalidate(); }, REFINE_DELAY_MS);
++  }, 1);
++
++  return null;
++}
+diff --git a/frontend/src/health/components/exercise/renderQuality.js b/frontend/src/health/components/exercise/renderQuality.js
+new file mode 100644
+index 0000000..d0108f0
+--- /dev/null
++++ b/frontend/src/health/components/exercise/renderQuality.js
+@@ -0,0 +1,37 @@
++// Picks a render tier for the browser 3D scenes. DLSS-class upscaling is not
++// reachable from WebGL, so "high" instead spends spare GPU budget on native
++// resolution, MSAA, ambient occlusion and a supersampled frame once the scene
++// settles. Weak or software GPUs keep the original lightweight path.
++const SOFTWARE_GPU = /swiftshader|llvmpipe|software|basic render|mesa offscreen/i;
++
++const TIERS = new Set(['low', 'medium', 'high']);
++
++// QA/support override: localStorage 'synex-render-quality' = low | medium | high.
++export function forcedRenderQuality(env = globalThis) {
++  try { const tier = env?.localStorage?.getItem('synex-render-quality'); return TIERS.has(tier) ? tier : null; } catch { return null; }
++}
++
++export function detectRenderQuality(env = globalThis) {
++  const forced = forcedRenderQuality(env);
++  if (forced) return forced;
++  const nav = env?.navigator || {};
++  const memory = nav.deviceMemory ?? 8, cores = nav.hardwareConcurrency ?? 4;
++  const mobile = nav.userAgentData?.mobile ?? /Android|iPhone|iPad|iPod|Mobile/i.test(nav.userAgent || '');
++  if (nav.connection?.saveData || memory <= 2 || cores <= 2) return 'low';
++  if (mobile || memory < 6 || cores < 6) return 'medium';
++  return 'high';
++}
++
++// The UA heuristics cannot see the GPU, so the live renderer string can only lower the tier.
++export function refineRenderQuality(tier, rendererName = '') {
++  return SOFTWARE_GPU.test(rendererName) ? 'low' : tier;
++}
++
++export function renderSettings(tier, { compact = false, devicePixelRatio = 1 } = {}) {
++  const dprCap = Math.min(2, Math.max(1, devicePixelRatio));
++  if (tier === 'high') return { dpr: [1, dprCap], shadowMap: 2048, msaa: 4, ao: true, refineSamples: 3, powerPreference: 'high-performance' };
++  if (tier === 'medium') return { dpr: [1, compact ? Math.min(1.5, dprCap) : dprCap], shadowMap: 1024, msaa: 0, ao: false, refineSamples: compact ? 0 : 2, powerPreference: 'default' };
++  return { dpr: [1, compact ? 1 : 1.25], shadowMap: 512, msaa: 0, ao: false, refineSamples: 0, powerPreference: 'low-power' };
++}
++
++export const usesQualityPipeline = settings => settings.ao || settings.refineSamples > 0;
+diff --git a/frontend/tests/RenderQuality.test.js b/frontend/tests/RenderQuality.test.js
+new file mode 100644
+index 0000000..70c65cc
+--- /dev/null
++++ b/frontend/tests/RenderQuality.test.js
+@@ -0,0 +1,26 @@
++import { describe, expect, it } from 'vitest';
++import { detectRenderQuality, refineRenderQuality, renderSettings, usesQualityPipeline } from '../src/health/components/exercise/renderQuality.js';
++
++const env = navigator => ({ navigator });
++
++describe('render quality tiers', () => {
++  it('reserves the full pipeline for capable desktops', () => {
++    expect(detectRenderQuality(env({ deviceMemory: 8, hardwareConcurrency: 12, userAgent: 'Windows NT 10.0' }))).toBe('high');
++    expect(detectRenderQuality(env({ deviceMemory: 8, hardwareConcurrency: 8, userAgent: 'Mozilla/5.0 (Linux; Android 15) Mobile' }))).toBe('medium');
++    expect(detectRenderQuality(env({ deviceMemory: 2, hardwareConcurrency: 8 }))).toBe('low');
++    expect(detectRenderQuality(env({ deviceMemory: 16, hardwareConcurrency: 16, connection: { saveData: true } }))).toBe('low');
++  });
++
++  it('drops software renderers to the lightweight path but never raises a tier', () => {
++    expect(refineRenderQuality('high', 'ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device))')).toBe('low');
++    expect(refineRenderQuality('medium', 'ANGLE (NVIDIA GeForce RTX 4070)')).toBe('medium');
++  });
++
++  it('keeps low-tier and compact mobile scenes off the post-processing pipeline', () => {
++    const high = renderSettings('high', { devicePixelRatio: 3 });
++    expect(high).toMatchObject({ dpr: [1, 2], msaa: 4, ao: true, shadowMap: 2048 });
++    expect(usesQualityPipeline(high)).toBe(true);
++    expect(usesQualityPipeline(renderSettings('medium', { compact: true, devicePixelRatio: 3 }))).toBe(false);
++    expect(usesQualityPipeline(renderSettings('low'))).toBe(false);
++  });
++});
+-- 
+2.43.0
+

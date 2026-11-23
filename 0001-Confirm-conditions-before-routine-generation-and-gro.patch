@@ -1,0 +1,1662 @@
+From 6c556575eb3e1e2736536cf66a9c93438459f0d2 Mon Sep 17 00:00:00 2001
+From: ksg <sisungaa851@gmail.com>
+Date: Sat, 31 Oct 2026 17:12:59 +0900
+Subject: [PATCH] Confirm conditions before routine generation and group plans
+ by period
+
+- Re-check the profile's goal and environment in a panel before every
+  routine generation; confirmed values are saved to the exercise profile.
+- Add optional focus regions (squat/hinge/push/pull/core): focused patterns
+  lead each strength day and get one extra set unless volume is held.
+- Add a plan period (one day, 1-12 weeks, 1-12 months) and group the
+  routine page by month > week > day, opening the current week.
+- Derive experience level on the profile from training history and recent
+  weekly sessions; the routine panel only displays it.
+- Replace fixed view-angle buttons in the exercise viewer with drag and
+  45-degree rotate controls (character studio keeps its presets).
+- Remove calorie and actual-time inputs after a workout, and keep the
+  recovery stretches advancing when loading the next model stalls a frame.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ backend/app/health/exercise_engine.py         |  60 ++++--
+ backend/app/health/router.py                  |  10 +-
+ backend/app/health/schemas.py                 |  45 +++++
+ backend/tests/test_health.py                  |  60 ++++++
+ docs/EXERCISE_ALGORITHM.md                    |   4 +
+ .../e2e-local/exercise-library-studio.spec.js |  11 +-
+ frontend/e2e-local/gym-recovery.spec.js       |   5 +-
+ .../e2e-local/instruction-mannequin.spec.js   |   2 +-
+ frontend/e2e/avatar-quality.spec.js           |   4 +-
+ .../health/components/ExperienceDetail.jsx    |  32 ++++
+ .../health/components/RoutineConditions.jsx   | 171 ++++++++++++++++++
+ .../components/exercise/CameraCoaching.jsx    |   2 +-
+ .../components/exercise/ExerciseMotion.jsx    |   2 +-
+ .../components/exercise/ExerciseMotion3D.jsx  |  22 ++-
+ .../components/exercise/StretchRecovery.jsx   |   9 +-
+ .../components/exercise/TempoWorkout.jsx      |   4 +-
+ .../components/exercise/WorkoutMode.jsx       |   4 +-
+ .../components/exercise/WorkoutResults.jsx    |  26 +--
+ .../health/components/exercise/recovery.css   |   2 +-
+ .../components/exercise/workoutCalories.js    |  35 ----
+ .../src/health/lib/exerciseProfileOptions.js  |  72 ++++++++
+ frontend/src/health/pages/CharacterPage.jsx   |   2 +-
+ frontend/src/health/pages/ProfilePage.jsx     |  45 +----
+ frontend/src/health/pages/RoutinePage.jsx     |  86 +++++++--
+ frontend/src/shared/lib/localApi.js           |  17 +-
+ frontend/src/shared/lib/localRoutinePlan.js   |  12 +-
+ frontend/src/shared/styles.css                |  17 ++
+ frontend/tests/ExperienceLevel.test.js        |  19 ++
+ frontend/tests/LocalApi.test.js               |  14 ++
+ frontend/tests/LocalRoutinePlan.test.js       |  11 ++
+ frontend/tests/RoutinePage.test.jsx           |  66 ++++++-
+ frontend/tests/WorkoutMode.test.jsx           |   2 +-
+ frontend/tests/WorkoutRecovery.test.jsx       |  40 ++--
+ 33 files changed, 735 insertions(+), 178 deletions(-)
+ create mode 100644 frontend/src/health/components/ExperienceDetail.jsx
+ create mode 100644 frontend/src/health/components/RoutineConditions.jsx
+ delete mode 100644 frontend/src/health/components/exercise/workoutCalories.js
+ create mode 100644 frontend/src/health/lib/exerciseProfileOptions.js
+ create mode 100644 frontend/tests/ExperienceLevel.test.js
+
+diff --git a/backend/app/health/exercise_engine.py b/backend/app/health/exercise_engine.py
+index 94a1032..094a044 100644
+--- a/backend/app/health/exercise_engine.py
++++ b/backend/app/health/exercise_engine.py
+@@ -5,7 +5,7 @@ The LLM never selects movements or overrides screening, time budgets, or equipme
+ from __future__ import annotations
+ from datetime import date, timedelta
+ import json
+-from .schemas import ExerciseRoutine, RoutineExercise, Segment, SEGMENT_LABEL_KO, Goal, ExperienceLevel
++from .schemas import ExerciseRoutine, RoutineExercise, Segment, SEGMENT_LABEL_KO, Goal, ExperienceLevel, derive_experience_level
+ from .comparison import left_right_balance
+ from .exercise_catalog import CATALOG
+ from .store import new_id, now
+@@ -20,6 +20,13 @@ LIMITATION_WORDS = {
+     'ankle': ['발목', 'ankle'], 'elbow': ['팔꿈치', 'elbow'],
+ }
+ 
++REGION_FOCUS_LABELS = {'squat': '하체 앞쪽(허벅지)', 'hinge': '엉덩이·허벅지 뒤', 'push': '가슴·어깨',
++                       'pull': '등', 'core': '복부·코어'}
++
++
++EXPERIENCE_LABEL_KO = {ExperienceLevel.BEGINNER: '초급', ExperienceLevel.INTERMEDIATE: '중급', ExperienceLevel.ADVANCED: '고급'}
++
++
+ class PlanBlocked(ValueError):
+     pass
+ 
+@@ -103,6 +110,8 @@ def build_deterministic_routine(user_id, measurement, profile, based_on_measurem
+     notices = ['성인 일반 건강관리용 제안입니다. 체성분은 근력·관절 상태를 직접 측정하지 않습니다.',
+                '체중·근육량 비율과 변화 기준은 보수적인 제품 규칙이며 임상적으로 검증된 처방 기준이 아닙니다.']
+     rationale = ['성별만으로 운동 종류나 중량을 결정하지 않습니다. 실제 측정값과 운동 가능 조건을 우선합니다.']
++    if profile.experience_detail and derive_experience_level(profile.experience_detail):
++        rationale.append(f'운동 경험 단계 {EXPERIENCE_LABEL_KO[profile.experience_level]}: 프로필의 운동 기간·주당 횟수 응답으로 정했습니다. 체력 측정 결과가 아닌 자기 보고입니다.')
+     if age is not None and age>=65:rationale.append('연령을 고려해 낮은 시작량과 쉬운 동작을 우선했습니다.')
+     if weight is not None and muscle is not None:
+         rationale.append(f'체중 {weight:g}kg·골격근량 {muscle:g}kg를 함께 고려하여 시작 동작 난이도를 조정했습니다. 중량(kg)은 추정하지 않습니다.')
+@@ -144,7 +153,9 @@ def build_deterministic_routine(user_id, measurement, profile, based_on_measurem
+         sets = min(previous_sets)
+     if logs and sum(w.completed for w in logs)/len(logs)<.5:
+         sets=max(1,sets-1);progression='최근 기록의 완료율이 낮아 시작량을 줄였습니다. 미기록 운동은 완료율에 포함하지 않습니다.'
++    hold_volume = False
+     if logs and any(w.difficulty == 'hard' or (w.rpe or 0)>=8 for w in logs):
++        hold_volume = True
+         sets = max(1, min(sets, min(previous_sets or [sets]) - 1))
+         conservative = True
+         progression = '최근 어려움 피드백을 반영해 세트 수를 줄이거나 쉬운 동작으로 전환했습니다.'
+@@ -159,27 +170,36 @@ def build_deterministic_routine(user_id, measurement, profile, based_on_measurem
+             delta = muscle - old.skeletal_muscle_mass
+             rationale.append(f'이전 대비 골격근량 {delta:+.2f}kg. 단일 체성분 변화만으로 근력 향상이나 운동 효과를 단정하지 않습니다.')
+             if delta / old.skeletal_muscle_mass <= -0.02:
+-                muscle_loss = True; conservative = True; sets = 1
++                muscle_loss = True; conservative = True; sets = 1; hold_volume = True
+                 progression = '골격근량 감소가 관찰되어 증량을 보류하고 쉬운 동작·낮은 시작량으로 재구성했습니다. 같은 조건에서 재측정하세요.'
+         if measurement.body_fat_percentage is not None and old.body_fat_percentage is not None:
+             fat_rise = measurement.body_fat_percentage - old.body_fat_percentage >= 1
+     fat_focus = profile.goal == Goal.FAT_MANAGEMENT and not underweight and not muscle_loss
+     if fat_rise and fat_focus:
+         rationale.append('감량 목표와 체지방률 상승을 함께 반영해 가능한 시간 안에서 걷기 비중을 늘렸습니다.')
+-    rationale.append(f'주 {profile.days_per_week}회·회당 {profile.minutes_per_session}분, {profile.exercise_location} 환경과 실제 선택한 장비만 사용합니다.')
++    one_day = profile.plan_unit == 'day'
++    days_per_week = 1 if one_day else profile.days_per_week
++    period_text = '하루' if one_day else f'{profile.plan_length}주' if profile.plan_unit == 'week' else f'{profile.plan_length}개월'
++    rationale.append(('하루 1회' if one_day else f'{period_text} 동안 주 {days_per_week}회') + f'·회당 {profile.minutes_per_session}분, {profile.exercise_location} 환경과 실제 선택한 장비만 사용합니다.')
+     rationale.append('체성분 차이는 근력 차이의 확정 근거가 아니므로 한쪽만 더 무겁게 훈련하지 않습니다.')
+     # Alternate strength/recovery days: same muscle groups are not loaded hard every day.
+-    schedule_days = {1:[0], 2:[0,3], 3:[0,2,4], 4:[0,2,4,6], 5:[0,1,2,4,6], 6:[0,1,2,3,4,6], 7:list(range(7))}[profile.days_per_week]
+-    strength_indices = {1:[0], 2:[0,1], 3:[0,1,2], 4:[0,1,2], 5:[0,2,3], 6:[0,2,4], 7:[0,2,4]}[profile.days_per_week]
++    schedule_days = {1:[0], 2:[0,3], 3:[0,2,4], 4:[0,2,4,6], 5:[0,1,2,4,6], 6:[0,1,2,3,4,6], 7:list(range(7))}[days_per_week]
++    strength_indices = {1:[0], 2:[0,1], 3:[0,1,2], 4:[0,1,2], 5:[0,2,3], 6:[0,2,4], 7:[0,2,4]}[days_per_week]
+     weekdays = ['월','화','수','목','금','토','일']
+     patterns = ['squat','push','pull','hinge','core']
+     if any('ARM' in s.value for s in weak): patterns = ['push','pull','squat','hinge','core']
+     elif Segment.TRUNK in weak: patterns = ['core','hinge','squat','push','pull']
++    focus = set(profile.focus_regions)
++    focus_tier = lambda p: 0 if p in focus else 1
++    if focus:
++        rationale.append('집중 부위: ' + ', '.join(REGION_FOCUS_LABELS[p] for p in patterns if p in focus)
++                         + '. 먼저 배치하고 시간 안에서 1세트를 더합니다. 다른 부위도 시간이 허락하는 만큼 함께 구성합니다.'
++                         + (' 최근 부담·근육량 변화로 이번에는 세트를 더하지 않았습니다.' if hold_volume else ''))
+     exercises = []; day_minutes = {}; schedule = []
+     for day_idx, calendar_day in enumerate(schedule_days):
+         day = day_idx + 1
+         strength = day_idx in strength_indices
+-        schedule.append(f'Day {day} · {weekdays[calendar_day]} · ' + ('전신 근력' if strength else '가벼운 활동·회복'))
++        schedule.append('오늘 · 전신 근력' if one_day else f'Day {day} · {weekdays[calendar_day]} · ' + ('전신 근력' if strength else '가벼운 활동·회복'))
+         budget = min(profile.minutes_per_session, 60)
+         warm_cool = 4
+         remaining = budget - warm_cool
+@@ -189,14 +209,16 @@ def build_deterministic_routine(user_id, measurement, profile, based_on_measurem
+         if strength:
+             # Rotate which patterns lead short sessions; don't omit the same muscle groups every day.
+             rotation = (day_idx * 2) % len(patterns)
+-            for pattern in patterns[rotation:] + patterns[:rotation]:
++            # Stable sort keeps the day rotation within each purpose tier.
++            for pattern in sorted(patterns[rotation:] + patterns[:rotation], key=focus_tier):
+                 pool = [m for m in candidates if m['pattern'] == pattern]
+                 if pool:
+                     preference = ' '.join(profile.preferences).lower()
++                    easy = conservative
+                     pool.sort(key=lambda m: (not (m['name'].lower() in preference or m['id'] in preference) if preference else False,
+-                                             m['easy'] != conservative, not bool(m['equipment']), m['id']))
++                                             m['easy'] != easy, not bool(m['equipment']), m['id']))
+                     # Rotate within equally suitable candidates across training days.
+-                    rank=lambda m:(m['easy'] != conservative, not bool(m['equipment']))
++                    rank=lambda m:(m['easy'] != easy, not bool(m['equipment']))
+                     preferred=[m for m in pool if preference and (m['name'].lower() in preference or m['id'] in preference)]
+                     best=preferred or [m for m in pool if rank(m)==rank(pool[0])]
+                     pool=[best[day_idx % len(best)]]
+@@ -204,10 +226,15 @@ def build_deterministic_routine(user_id, measurement, profile, based_on_measurem
+         day_sets = sets
+         while day_sets > 1 and day_sets * .7 + (day_sets - 1) + .5 > remaining - cardio_budget:
+             day_sets -= 1
+-        per_exercise = day_sets * 0.7 + max(0, day_sets - 1) * 1 + 0.5
++        minutes_for = lambda n: n * 0.7 + max(0, n - 1) * 1 + 0.5
+         for m in available_patterns:
++            focused_move = m['pattern'] in focus
++            ex_sets = min(2 if conservative else 3, day_sets + 1) if focused_move and not hold_volume else day_sets
++            if remaining - cardio_budget < minutes_for(ex_sets): ex_sets = min(ex_sets, day_sets)
++            per_exercise = minutes_for(ex_sets)
+             if remaining - cardio_budget < per_exercise: continue
+             reason = '전신 주요 움직임을 균형 있게 구성하고, 사용 가능한 장비와 제약사항을 반영했습니다.'
++            if focused_move: reason += f' {REGION_FOCUS_LABELS[m["pattern"]]}을(를) 집중 부위로 선택해 먼저 배치했습니다.'
+             for segment in below:
+                 if SEGMENT_LABEL_KO[segment] in m['regions'] or any(t in ' '.join(m['regions']) for t in (['하체','다리','둔근'] if 'LEG' in segment.value else ['상체','팔'] if 'ARM' in segment.value else ['코어','몸통'])):
+                     row = reference_rows[segment.value]['lean']
+@@ -215,7 +242,7 @@ def build_deterministic_routine(user_id, measurement, profile, based_on_measurem
+                     break
+             if conservative: reason += ' 체격·경험·측정자료에 맞춰 낮은 시작 부하를 선택했습니다.'
+             exercises.append(RoutineExercise(exercise_id=f'd{day}-{m["id"]}', motion_id=m['id'],
+-                day_number=day, exercise_name=m['name'], sets=day_sets, reps=m['reps'] if m['dose_type']=='hold' else '8–12회 (좌우 동일)', rest_seconds=60,
++                day_number=day, exercise_name=m['name'], sets=ex_sets, reps=m['reps'] if m['dose_type']=='hold' else '8–12회 (좌우 동일)', rest_seconds=60,
+                 equipment=m['equipment'],training_type=m['training_type'],dose_type=m['dose_type'],hold_seconds=m.get('hold_seconds'),
+                 instructions=m['instructions'], cautions=m['cautions'], target_regions=m['regions'],
+                 intensity='2–3회 더 할 여유를 남기고 중단', estimated_minutes=round(per_exercise,1), reason=reason))
+@@ -235,12 +262,19 @@ def build_deterministic_routine(user_id, measurement, profile, based_on_measurem
+     if len(covered)<5: notices.append('제약 또는 장비 부족으로 일부 움직임이 제외되었습니다. 전체 근력훈련을 대체하는 완전한 계획은 아닙니다.')
+     if profile.training_mode=='equipment': notices.append('선택한 장비를 우선 사용하며, 적합한 장비 운동이 없는 부위는 맨몸 동작으로 보완합니다.')
+     if not equipment or profile.training_mode=='bodyweight': notices.append('맨몸 구성에서는 당기기 저항운동이 제한됩니다. 밴드 등 장비 확보 후 다시 생성할 수 있습니다.')
++    weeks = 0 if one_day else profile.plan_length * (4 if profile.plan_unit == 'month' else 1)
++    if weeks > 4:
++        notices.append(f'{period_text} 계획이라도 같은 구성을 계속 고정하지 않습니다. 4주마다 재측정하거나 수행 기록을 남긴 뒤 다시 생성하세요.')
++    if one_day:
++        notices.append('하루 루틴은 한 번 수행하는 구성입니다. 꾸준히 하려면 주 또는 개월 단위로 계획을 만드세요.')
+     notices.append('매회 표시된 시간에 준비·정리운동 각 2분이 포함됩니다. 주간 권장 활동량을 충족하지 못할 수 있으므로 여건에 맞춰 점진적으로 활동을 늘리세요.')
+     goal_label = {Goal.MUSCLE_GAIN:'근육 증가',Goal.FAT_MANAGEMENT:'체지방 관리',Goal.GENERAL_FITNESS:'전신 체력',Goal.BALANCE:'균형 있는 운동',Goal.GENERAL_HEALTH:'일반 건강관리'}[profile.goal]
+     if underweight and profile.goal==Goal.FAT_MANAGEMENT: goal_label='체력 유지·건강 상담 우선'
++    focused = [REGION_FOCUS_LABELS[p] for p in patterns if p in focus]
++    if focused: goal_label += ' · ' + ', '.join(focused) + ' 집중'
+     return ExerciseRoutine(id=new_id('ROUTINE'),user_id=user_id,created_at=now(),based_on_measurement_id=based_on_measurement_id or measurement.id,
+-        goal=goal_label,summary=(change_note+' ' if change_note else '')+f'{goal_label}을 위한 개인별 시작 계획입니다. {progression}',
+-        duration_weeks=4,days_per_week=profile.days_per_week,exercises=exercises,generated_by='deterministic',algorithm_version=VERSION,
++        goal=goal_label,summary=(change_note+' ' if change_note else '')+f'{goal_label}을 위한 {period_text} 개인별 계획입니다. {progression}',
++        duration_weeks=weeks,days_per_week=days_per_week,period_unit=profile.plan_unit,period_length=profile.plan_length,exercises=exercises,generated_by='deterministic',algorithm_version=VERSION,
+         rationale=rationale,notices=notices,input_snapshot={'reference_group_id':(reference or {}).get('id'),'reference_metadata':(reference or {}).get('metadata'),'weight_kg':weight,'height_cm':height,'muscle_kg':muscle,
+             'adherence':round(len(completed)/len(logs),3) if logs else None,'feedback_ids':feedback_key, 'body_fat_percent':measurement.body_fat_percentage,'bmi':round(bmi,1) if bmi else None,'profile':profile.model_dump(mode='json')},
+         day_minutes=day_minutes,progression=progression,sources=SOURCES,schedule=schedule)
+diff --git a/backend/app/health/router.py b/backend/app/health/router.py
+index eaea1fd..e89436d 100644
+--- a/backend/app/health/router.py
++++ b/backend/app/health/router.py
+@@ -307,10 +307,16 @@ def update_exercise_profile(patch: dict, user: User = Depends(require('routine:w
+     try:
+         updated = ExerciseProfile(**merged)
+     except ValidationError:
+-        raise HTTPException(422, '운동 일수는 1–7일, 시간은 10–180분으로 입력하고 운동환경을 확인하세요.')
++        raise HTTPException(422, '운동 일수는 1–7일, 시간은 10–180분으로 입력하고 운동환경·루틴 기간(1–12)·운동 경험 항목을 확인하세요.')
+     return store.upsert_profile(updated)
+ 
+ 
++def _profile_conditions(snapshot):
++    # Routines saved before these fields existed had no focus and no detailed experience answers.
++    return {**snapshot, 'focus_regions': snapshot.get('focus_regions') or [], 'experience_detail': snapshot.get('experience_detail'),
++            'plan_unit': snapshot.get('plan_unit', 'week'), 'plan_length': snapshot.get('plan_length', 4)}
++
++
+ @router.get('/exercise-routines')
+ def list_exercise_routines(user: User = Depends(require('routine:read'))):
+     routines = store.list_routines(user.id)
+@@ -321,7 +327,7 @@ def list_exercise_routines(user: User = Depends(require('routine:read'))):
+         reason = None
+         if measurement and routine.based_on_measurement_id != measurement.id:
+             reason = '새 측정값이 등록되었습니다. 운동 계획을 다시 생성하세요.'
+-        elif profile and routine.input_snapshot.get('profile') and routine.input_snapshot['profile'] != profile.model_dump(mode='json'):
++        elif profile and routine.input_snapshot.get('profile') and _profile_conditions(routine.input_snapshot['profile']) != _profile_conditions(profile.model_dump(mode='json')):
+             reason = '운동 프로필이 변경되었습니다. 변경된 조건으로 계획을 다시 생성하세요.'
+         elif measurement and routine.input_snapshot.get('reference_group_id') != _average_for(_require_user_record(user.id), measurement)['selected_group_id']:
+             reason = '비교군 기준이 변경되었습니다. 같은 기준으로 운동 이유를 보려면 계획을 다시 생성하세요.'
+diff --git a/backend/app/health/schemas.py b/backend/app/health/schemas.py
+index 959b6a3..d02a698 100644
+--- a/backend/app/health/schemas.py
++++ b/backend/app/health/schemas.py
+@@ -221,6 +221,28 @@ class ReferenceRange(BaseModel):
+ 
+ 
+ # --- Exercise profile / routines ----------------------------------------------------------------
++# Product heuristic for choosing a starting difficulty, not a fitness test. Scores 0-3 per item.
++EXPERIENCE_SCORES = {
++    'training_history': {'none': 0, 'lt6m': 1, '6m_2y': 2, 'gt2y': 3},
++    'weekly_sessions': {'0': 0, '1_2': 1, '3_4': 2, '5plus': 3},
++}
++
++
++class ExperienceDetail(BaseModel):
++    training_history: Optional[Literal['none', 'lt6m', '6m_2y', 'gt2y']] = None
++    weekly_sessions: Optional[Literal['0', '1_2', '3_4', '5plus']] = None
++
++
++def derive_experience_level(detail):
++    if detail is None or any(getattr(detail, k) is None for k in EXPERIENCE_SCORES):
++        return None
++    total = sum(EXPERIENCE_SCORES[k][getattr(detail, k)] for k in EXPERIENCE_SCORES)
++    level = 0 if total <= 1 else 1 if total <= 4 else 2
++    # Frequent recent sessions without a training history still start conservatively.
++    level = min(level, {'none': 0, 'lt6m': 1}.get(detail.training_history, 2))
++    return [ExperienceLevel.BEGINNER, ExperienceLevel.INTERMEDIATE, ExperienceLevel.ADVANCED][level]
++
++
+ class ExerciseProfile(BaseModel):
+     user_id: str
+     experience_level: ExperienceLevel = ExperienceLevel.BEGINNER
+@@ -232,6 +254,13 @@ class ExerciseProfile(BaseModel):
+     available_equipment: list[str] = Field(default_factory=list)
+     limitations: list[str] = Field(default_factory=list)
+     preferences: list[str] = Field(default_factory=list)
++    # Movement patterns the user wants to emphasise; the rest stay at the balanced default.
++    focus_regions: list[Literal['squat', 'hinge', 'push', 'pull', 'core']] = Field(default_factory=list)
++    # Plan period chosen at routine creation: one day, N weeks or N months.
++    plan_unit: Literal['day', 'week', 'month'] = 'week'
++    plan_length: int = Field(default=4, ge=1, le=12)
++    # Self-reported indicators; when all are answered they decide experience_level.
++    experience_detail: Optional[ExperienceDetail] = None
+     # Safety screening (section 21) -- if any is true, routine generation is refused server-side.
+     safety_chest_pain: bool = False
+     safety_fainting: bool = False
+@@ -239,6 +268,20 @@ class ExerciseProfile(BaseModel):
+     safety_acute_injury: bool = False
+     safety_medical_restriction: bool = False
+ 
++    @field_validator('focus_regions')
++    @classmethod
++    def _unique_focus(cls, v):
++        return list(dict.fromkeys(v))
++
++    @model_validator(mode='after')
++    def _level_from_detail(self):
++        if self.plan_unit == 'day':
++            self.plan_length = 1
++        derived = derive_experience_level(self.experience_detail)
++        if derived is not None:
++            self.experience_level = derived
++        return self
++
+ 
+ class RoutineExercise(BaseModel):
+     training_type: str = 'bodyweight'
+@@ -270,6 +313,8 @@ class ExerciseRoutine(BaseModel):
+     summary: str = ''
+     duration_weeks: int = 6
+     days_per_week: int = Field(default=3, ge=1, le=7)
++    period_unit: Literal['day', 'week', 'month'] = 'week'
++    period_length: int = 4
+     exercises: list[RoutineExercise] = Field(default_factory=list)
+     generated_by: str = 'deterministic'  # 'deterministic' | 'llm'
+     algorithm_version: str = 'legacy'
+diff --git a/backend/tests/test_health.py b/backend/tests/test_health.py
+index bcc0a83..17bae3e 100644
+--- a/backend/tests/test_health.py
++++ b/backend/tests/test_health.py
+@@ -292,6 +292,66 @@ def test_weight_and_muscle_change_plan():
+     assert [(e.motion_id,e.sets) for e in normal.exercises] != [(e.motion_id,e.sets) for e in lower_support.exercises]
+ 
+ 
++def test_focus_regions_lead_and_get_one_more_set():
++    from app.health.schemas import BodyCompositionMeasurement,ExerciseProfile
++    from app.health.exercise_engine import build_deterministic_routine, CATALOG
++    m=BodyCompositionMeasurement(id='a',user_id='u',measurement_date='2026-01-01',height=175,weight=70,skeletal_muscle_mass=32)
++    base=dict(user_id='u',experience_level='INTERMEDIATE',minutes_per_session=60,days_per_week=3)
++    plain=build_deterministic_routine('u',m,ExerciseProfile(**base))
++    focused=build_deterministic_routine('u',m,ExerciseProfile(**base,focus_regions=['hinge']))
++    pattern={c['id']:c['pattern'] for c in CATALOG}
++    plain_sets={(e.day_number,pattern[e.motion_id]):e.sets for e in plain.exercises if pattern[e.motion_id]!='cardio'}
++    for day in {e.day_number for e in focused.exercises}:
++        strength=[e for e in focused.exercises if e.day_number==day and pattern[e.motion_id]!='cardio']
++        if not strength: continue
++        assert pattern[strength[0].motion_id]=='hinge'
++        for e in strength:
++            expected=plain_sets[(day,pattern[e.motion_id])]
++            assert e.sets==(min(3,expected+1) if pattern[e.motion_id]=='hinge' else expected)
++    assert '엉덩이·허벅지 뒤 집중' in focused.goal
++
++
++def test_focus_regions_unlimited():
++    from app.health.schemas import ExerciseProfile
++    assert ExerciseProfile(user_id='u',focus_regions=['squat','push','core','pull','hinge']).focus_regions==['squat','push','core','pull','hinge']
++
++
++def test_experience_level_derived_from_detail():
++    from app.health.schemas import ExerciseProfile
++    level=lambda h,w: ExerciseProfile(user_id='u',experience_detail={'training_history':h,'weekly_sessions':w}).experience_level
++    assert level('gt2y','3_4')=='ADVANCED'
++    assert level('6m_2y','3_4')=='INTERMEDIATE'
++    assert level('lt6m','0')=='BEGINNER'
++    # Frequent sessions without a training history stay capped.
++    assert level('none','5plus')=='BEGINNER'
++    assert level('lt6m','5plus')=='INTERMEDIATE'
++    # Incomplete answers keep the manually chosen level.
++    assert ExerciseProfile(user_id='u',experience_level='ADVANCED',experience_detail={'weekly_sessions':'0'}).experience_level=='ADVANCED'
++
++
++def test_plan_period_units():
++    from app.health.schemas import BodyCompositionMeasurement,ExerciseProfile
++    from app.health.exercise_engine import build_deterministic_routine
++    m=BodyCompositionMeasurement(id='a',user_id='u',measurement_date='2026-01-01',height=175,weight=70,skeletal_muscle_mass=32)
++    day=build_deterministic_routine('u',m,ExerciseProfile(user_id='u',days_per_week=4,plan_unit='day',plan_length=9))
++    assert (day.period_unit,day.period_length,day.days_per_week,day.duration_weeks)==('day',1,1,0)
++    assert {e.day_number for e in day.exercises}=={1}
++    month=build_deterministic_routine('u',m,ExerciseProfile(user_id='u',days_per_week=3,plan_unit='month',plan_length=3))
++    assert (month.period_unit,month.period_length,month.duration_weeks)==('month',3,12)
++    assert any('4주마다' in n for n in month.notices)
++    week=build_deterministic_routine('u',m,ExerciseProfile(user_id='u',plan_unit='week',plan_length=2))
++    assert week.duration_weeks==2 and '2주' in week.summary
++
++
++def test_older_routine_snapshot_without_new_fields_is_not_stale(client):
++    client.put('/api/exercise-profile',json={'days_per_week':3})
++    client.post('/api/exercise-routines/generate')
++    assert client.get('/api/exercise-routines').json()[0]['needs_review'] is False
++    client.put('/api/exercise-profile',json={'focus_regions':['core']})
++    assert client.get('/api/exercise-routines').json()[0]['needs_review'] is True
++    assert client.put('/api/exercise-profile',json={'plan_length':13}).status_code==422
++
++
+ def test_unknown_condition_blocks(client):
+     client.put('/api/exercise-profile',json={'limitations':['심장질환']})
+     assert client.post('/api/exercise-routines/generate').status_code==409
+diff --git a/docs/EXERCISE_ALGORITHM.md b/docs/EXERCISE_ALGORITHM.md
+index 9b8dc34..ac18d89 100644
+--- a/docs/EXERCISE_ALGORITHM.md
++++ b/docs/EXERCISE_ALGORITHM.md
+@@ -18,6 +18,10 @@
+ 6. 전신 주요 움직임(앉기·밀기·당기기·고관절·몸통)을 회전 배치. 선택 장비로 수행할 수 없는 당기기 운동 등은 한계를 명시. 짧은 세션은 순서를 순환한다.
+ 7. 매회 준비·정리 각 2분 포함, 선택 시간과 최대 60분 이내로 구성. 근력 동작당 세트·휴식·전환 시간으로 예상 시간을 계산. 이는 실제 소요시간의 보장이 아니며 진행 속도에 따라 쉬거나 중단할 수 있다.
+ 8. 감량 목표에서 걷기 비중을 높이고, 저체중 범위에서는 감량 구성을 적용하지 않는다. 주 4회 이상은 근력/가벼운 활동을 구분하여 같은 부위를 매일 강하게 훈련시키지 않는다.
++9. 루틴 생성(재생성 포함) 전에 프로필의 운동 목표·환경을 다시 보여 주고 확인받는다. 이 화면에서 고친 값은 운동 프로필에 저장된 뒤 생성에 쓰인다.
++10. 집중 부위(`focus_regions`, 선택, 개수 제한 없음): 하체 앞쪽(squat)·엉덩이·허벅지 뒤(hinge)·가슴·어깨(push)·등(pull)·복부·코어(core) 중에서 고른다. 고른 부위는 먼저 배치하고 시간 안에서 1세트를 더한다(서버 3세트 상한, 보수적 시작이면 2세트). 모두 고르면 순서는 기본과 같고 세트만 늘어난다. 최근 어려움 피드백이나 골격근량 감소가 있으면 집중 부위도 세트를 더하지 않는다. 사용자의 선택을 반영하는 제품 규칙일 뿐, 특정 부위를 키우는 효과를 보장하지 않는다.
++11. 운동 경험(`experience_detail`, 프로필에서만 설정): 규칙적 운동 기간과 최근 3개월 주당 운동 횟수를 각각 0–3점으로 응답한다. 합계 0–1점은 초급, 2–4점은 중급, 5–6점은 고급이다. 운동 기간이 '처음'이면 초급, '6개월 미만'이면 중급까지로 제한한다. 자기 보고 기반 휴리스틱이며 체력 검사가 아니다. 두 항목을 모두 답하기 전에는 기존 단계를 유지한다.
++12. 루틴 기간(`plan_unit`, `plan_length`): 하루(1회 루틴, 주당 일수 무시) / 1–12주 / 1–12개월. `duration_weeks`는 하루 0, 주 N, 개월 N×4로 저장한다. 4주가 넘는 계획이어도 구성을 고정하지 않으며, 4주마다 재측정·기록 후 재생성을 안내한다.
+ 
+ ## 재측정·피드백
+ 
+diff --git a/frontend/e2e-local/exercise-library-studio.spec.js b/frontend/e2e-local/exercise-library-studio.spec.js
+index 84db88c..238a098 100644
+--- a/frontend/e2e-local/exercise-library-studio.spec.js
++++ b/frontend/e2e-local/exercise-library-studio.spec.js
+@@ -30,7 +30,7 @@ test('catalogue keeps static previews and one large selected 3D stage on a small
+  await expect(page.getByRole('button',{name:'운동 목록으로 돌아가기',exact:true})).toBeInViewport();
+  await expect.poll(async()=>(await stage.locator('canvas').boundingBox()).height).toBeGreaterThanOrEqual(350);
+  await expect.poll(async()=>(await stage.locator('.exercise-library-stage-heading').boundingBox()).height).toBeLessThan(100);
+- for(const name of ['정면 운동 시범 보기','45° 운동 시범 보기','측면 운동 시범 보기','후면 운동 시범 보기','자유 운동 시범 보기']){
++ for(const name of ['왼쪽으로 회전','오른쪽으로 회전']){
+   const control=stage.getByRole('button',{name,exact:true});
+   await expect(control).toBeInViewport();
+   expect(await control.evaluate(button=>{const rect=button.getBoundingClientRect(),top=document.elementFromPoint(rect.x+rect.width/2,rect.y+rect.height/2);return button===top||button.contains(top);})).toBe(true);
+@@ -84,10 +84,9 @@ test('changing the selected exercise resets the stage and keeps directions and p
+  await expect(stage.locator('canvas')).toBeVisible();
+  await expect.poll(async()=>Number(await stage.locator('canvas').getAttribute('data-exercise-progress'))).toBeGreaterThan(0);
+  await expect(stage.getByRole('button',{name:'일시정지',exact:true})).toBeVisible();
+- for(const name of ['정면 운동 시범 보기','측면 운동 시범 보기','후면 운동 시범 보기']){
+-  await stage.getByRole('button',{name,exact:true}).click();
+-  await expect(stage.getByRole('button',{name,exact:true})).toHaveAttribute('aria-pressed','true');
+- }
++ // Only rotation remains; fixed view-angle presets were removed from the exercise viewer.
++ await expect(stage.getByRole('button',{name:'정면 운동 시범 보기',exact:true})).toHaveCount(0);
++ for(const name of ['왼쪽으로 회전','오른쪽으로 회전'])await stage.getByRole('button',{name,exact:true}).click();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  expect(errors).toEqual([]);
+ });
+@@ -120,7 +119,7 @@ test('supported library movement opens the matching camera guide with an explici
+  await expect(cameraEntry).toBeInViewport();
+  expect(await cameraEntry.evaluate(link=>{const rect=link.getBoundingClientRect(),top=document.elementFromPoint(rect.x+rect.width/2,rect.y+rect.height/2);return link===top||link.contains(top);})).toBe(true);
+  await expect.poll(async()=>(await stage.locator('.exercise-library-stage-heading').boundingBox()).height).toBeLessThan(100);
+- await expect(stage.getByRole('button',{name:'측면 운동 시범 보기',exact:true})).toBeInViewport();
++ await expect(stage.getByRole('button',{name:'오른쪽으로 회전',exact:true})).toBeInViewport();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  await page.screenshot({path:info.outputPath('exercise-studio-bodyweight-393.png')});
+  await page.getByRole('link',{name:'이 동작 촬영·자세 교정',exact:true}).click();
+diff --git a/frontend/e2e-local/gym-recovery.spec.js b/frontend/e2e-local/gym-recovery.spec.js
+index 6aa3adc..2ee3bb9 100644
+--- a/frontend/e2e-local/gym-recovery.spec.js
++++ b/frontend/e2e-local/gym-recovery.spec.js
+@@ -34,8 +34,7 @@ test('finished exercise automatically starts five recovery motions, calculates c
+  await page.clock.runFor(100);await expect(recovery.locator('canvas')).toHaveAttribute('data-exercise-rendered',/^recovery_/);
+  const first=await recovery.locator('canvas').getAttribute('data-exercise-rendered');expect(first).toMatch(/^recovery_/);
+  await recovery.getByRole('button',{name:'이 스트레칭 건너뛰기'}).click();await expect(recovery.locator('canvas')).not.toHaveAttribute('data-exercise-rendered',first);
+- await page.getByLabel('계산할 몸무게 (kg)').fill('70');await page.getByLabel('맨몸 스쿼트 실제 운동 분').fill('10');await page.getByRole('button',{name:'실제 시간 확인 · 칼로리 계산'}).click();
+- await expect(page.locator('.calorie-total')).toContainText('47');
++ await expect(page.getByText(/칼로리/)).toHaveCount(0);
+  await recovery.getByRole('button',{name:'전체 30가지 · 동작 바꾸기'}).click();await expect(recovery.locator('.stretch-choice')).toHaveCount(30);
+  await page.screenshot({path:info.outputPath('automatic-recovery-and-calories.png'),fullPage:true});
+  const motions=new Set();
+@@ -55,5 +54,5 @@ test('finished exercise automatically starts five recovery motions, calculates c
+ test('skipping every exercise never starts recovery or adds calories',async({page})=>{
+  await page.goto('/health/pose?motion=hammer_curl');await page.getByRole('region',{name:'자동 운동 템포'}).getByRole('button',{name:'이 운동 건너뛰기'}).click();
+  await expect(page.getByRole('heading',{name:'오늘의 운동 결과'})).toBeVisible();await expect(page.getByRole('region',{name:'운동 후 스트레칭'}).locator('canvas')).toHaveCount(0);
+- await expect(page.getByLabel(/실제 운동 분/)).toHaveValue('0');await expect(page.locator('.calorie-total')).toHaveCount(0);
++ await expect(page.getByLabel(/실제 운동 분/)).toHaveCount(0);
+ });
+diff --git a/frontend/e2e-local/instruction-mannequin.spec.js b/frontend/e2e-local/instruction-mannequin.spec.js
+index 56c02a3..84c9651 100644
+--- a/frontend/e2e-local/instruction-mannequin.spec.js
++++ b/frontend/e2e-local/instruction-mannequin.spec.js
+@@ -12,7 +12,7 @@ test('reference-style instruction preserves playback when changing appearance an
+   await stage.getByLabel('동작 구간',{exact:true}).fill('50');
+   await expect(canvas).toHaveAttribute('data-exercise-progress','0.5');
+   await canvas.screenshot({path:info.outputPath('mannequin-squat-front.png')});
+-  await stage.getByRole('button',{name:'후면 운동 시범 보기',exact:true}).click();
++  for(let i=0;i<4;i++)await stage.getByRole('button',{name:'오른쪽으로 회전',exact:true}).click();
+   await canvas.screenshot({path:info.outputPath('mannequin-squat-back.png')});
+   await stage.getByRole('button',{name:'부위 강조 인체',exact:true}).click();
+   await expect(canvas).toHaveAttribute('data-exercise-appearance','mannequin');
+diff --git a/frontend/e2e/avatar-quality.spec.js b/frontend/e2e/avatar-quality.spec.js
+index 9de6835..aa188e5 100644
+--- a/frontend/e2e/avatar-quality.spec.js
++++ b/frontend/e2e/avatar-quality.spec.js
+@@ -8,7 +8,7 @@ test('dressed avatar renders from all sides and keeps joints visible through exe
+  await page.goto('/health/library');await page.getByLabel('운동·근육 검색').fill('맨몸 스쿼트');await page.getByRole('button',{name:'맨몸 스쿼트 동작 보기',exact:true}).click();
+  await page.getByRole('button',{name:'운동복 인체',exact:true}).click();
+  const motion=page.locator('.motion-viewer');await expect(motion.locator('canvas')).toBeVisible();await expect(page.getByLabel('운동복을 입은 3D 운동 시범')).toBeVisible();
+- for(const [phase,name] of [['0','start'],['50','bend']]){await page.getByLabel('동작 구간',{exact:true}).fill(phase);await motion.getByRole('button',{name:'측면 운동 시범 보기',exact:true}).click();await motion.screenshot({path:info.outputPath(`squat-${name}.png`)});}
+- await page.setViewportSize({width:390,height:844});await motion.getByRole('button',{name:'정면 운동 시범 보기',exact:true}).click();await motion.screenshot({path:info.outputPath('avatar-mobile.png')});
++ for(const [phase,name] of [['0','start'],['50','bend']]){await page.getByLabel('동작 구간',{exact:true}).fill(phase);await motion.screenshot({path:info.outputPath(`squat-${name}.png`)});}
++ await page.setViewportSize({width:390,height:844});await motion.getByRole('button',{name:'오른쪽으로 회전',exact:true}).click();await motion.screenshot({path:info.outputPath('avatar-mobile.png')});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);expect(errors).toEqual([]);
+ });
+diff --git a/frontend/src/health/components/ExperienceDetail.jsx b/frontend/src/health/components/ExperienceDetail.jsx
+new file mode 100644
+index 0000000..fc35624
+--- /dev/null
++++ b/frontend/src/health/components/ExperienceDetail.jsx
+@@ -0,0 +1,32 @@
++import React from 'react';
++import { EXPERIENCE_INDICATORS, EXPERIENCE_LABELS, deriveExperienceLevel } from '../lib/exerciseProfileOptions.js';
++
++// Detailed self-reported indicators that decide the experience level (초급/중급/고급).
++export default function ExperienceDetail({ detail, savedLevel, onChange, idPrefix = 'exp' }) {
++  const answers = detail || {};
++  const derived = deriveExperienceLevel(answers);
++  const answered = EXPERIENCE_INDICATORS.filter((x) => answers[x.key] != null).length;
++  return (
++    <div className="experience-detail">
++      <div className="experience-detail-head">
++        <label className="field-label" style={{ margin: 0 }}>운동 경험</label>
++        <span className={`experience-level ${derived ? 'set' : ''}`} aria-live="polite">
++          {derived ? `${EXPERIENCE_LABELS[derived]} 단계` : `${answered}/${EXPERIENCE_INDICATORS.length} 선택 · 현재 ${EXPERIENCE_LABELS[savedLevel] || '초급'}`}
++        </span>
++      </div>
++      <p className="muted" style={{ margin: '2px 0 8px' }}>두 항목을 모두 고르면 단계가 자동으로 정해집니다. 운동을 시작한 지 6개월이 안 됐으면 자주 운동해도 중급까지만 정해집니다.</p>
++      <div className="profile-grid">
++        {EXPERIENCE_INDICATORS.map((indicator) => (
++          <div key={indicator.key}>
++            <label className="field-label" htmlFor={`${idPrefix}-${indicator.key}`}>{indicator.label}</label>
++            <select id={`${idPrefix}-${indicator.key}`} className="text-input" value={answers[indicator.key] ?? ''}
++              onChange={(e) => onChange({ ...answers, [indicator.key]: e.target.value || null })}>
++              <option value="">선택하세요</option>
++              {indicator.options.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
++            </select>
++          </div>
++        ))}
++      </div>
++    </div>
++  );
++}
+diff --git a/frontend/src/health/components/RoutineConditions.jsx b/frontend/src/health/components/RoutineConditions.jsx
+new file mode 100644
+index 0000000..de9ef5c
+--- /dev/null
++++ b/frontend/src/health/components/RoutineConditions.jsx
+@@ -0,0 +1,171 @@
++import React, { useEffect, useState } from 'react';
++import { Link } from 'react-router-dom';
++import { HealthAPI } from '../../shared/lib/api.js';
++import { Card, Skeleton, ErrorState } from '../../shared/components/ui.jsx';
++import { useApiData } from '../lib/useApiData.js';
++import {
++  GOAL_OPTIONS, LOCATION_OPTIONS, EQUIPMENT_OPTIONS, REGION_FOCUS_OPTIONS,
++  PLAN_UNITS, MAX_PLAN_LENGTH, EXPERIENCE_LABELS, toCsv, fromCsv,
++} from '../lib/exerciseProfileOptions.js';
++
++// Re-checks the profile's "운동 목표 및 환경" right before a routine is generated and lets the
++// user pick the plan period and regions to focus on. Experience is a profile-only setting. Confirmed values are saved to the exercise profile, so the next
++// generation and the profile screen start from the same conditions.
++export default function RoutineConditions({ onConfirm, onCancel, busy }) {
++  const exercise = useApiData(() => HealthAPI.getExerciseProfile(), []);
++  const [form, setForm] = useState(null);
++  const [equipment, setEquipment] = useState(new Set());
++  const [limitationsText, setLimitationsText] = useState('');
++  const [preferencesText, setPreferencesText] = useState('');
++  const [error, setError] = useState(null);
++  const [saving, setSaving] = useState(false);
++
++  useEffect(() => {
++    if (!exercise.data) return;
++    setForm({ ...exercise.data, focus_regions: [...(exercise.data.focus_regions || [])],
++      plan_unit: exercise.data.plan_unit || 'week', plan_length: exercise.data.plan_length || 4 });
++    setEquipment(new Set(exercise.data.available_equipment || []));
++    setLimitationsText(toCsv(exercise.data.limitations));
++    setPreferencesText(toCsv(exercise.data.preferences));
++  }, [exercise.data]);
++
++  if (exercise.loading && !exercise.data) return <Card><Skeleton height={260} /></Card>;
++  if (exercise.error) return <ErrorState message={exercise.error.message} onRetry={exercise.reload} />;
++  if (!form) return null;
++
++  const set = (key, value) => setForm({ ...form, [key]: value });
++  function toggleFocus(region) {
++    const current = form.focus_regions;
++    set('focus_regions', current.includes(region) ? current.filter((r) => r !== region) : [...current, region]);
++  }
++  function toggleEquipment(value) {
++    const next = new Set(equipment);
++    if (next.has(value)) next.delete(value); else next.add(value);
++    setEquipment(next);
++  }
++
++  async function confirm() {
++    setSaving(true);
++    setError(null);
++    try {
++      await HealthAPI.updateExerciseProfile({
++        goal: form.goal,
++        plan_unit: form.plan_unit,
++        plan_length: form.plan_unit === 'day' ? 1 : Number(form.plan_length) || 1,
++        days_per_week: Number(form.days_per_week) || 1,
++        minutes_per_session: Number(form.minutes_per_session) || 10,
++        training_mode: form.training_mode || 'mixed',
++        exercise_location: form.exercise_location,
++        available_equipment: [...equipment],
++        limitations: fromCsv(limitationsText),
++        preferences: fromCsv(preferencesText),
++        focus_regions: form.focus_regions,
++      });
++    } catch (e) {
++      setError(Error(`운동 조건을 저장하지 못해 루틴을 만들지 않았습니다. ${e.message}`));
++      setSaving(false);
++      return;
++    }
++    setSaving(false);
++    await onConfirm();
++  }
++
++  const disabled = saving || busy;
++  return (
++    <Card title="루틴 생성 전 운동 조건 확인">
++      <p className="muted" style={{ marginTop: 0 }}>프로필의 운동 목표와 환경입니다. 지금 상황과 다르면 여기서 고친 뒤 생성하세요. 고친 내용은 프로필에도 저장됩니다.</p>
++      <fieldset disabled={disabled} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
++        <div style={{ marginBottom: 14 }}>
++          <label className="field-label">루틴 기간</label>
++          <div className="plan-period">
++            <div className="plan-period-units" role="radiogroup" aria-label="루틴 기간 단위">
++              {PLAN_UNITS.map((u) => (
++                <button key={u.value} type="button" role="radio" aria-checked={form.plan_unit === u.value}
++                  className={form.plan_unit === u.value ? 'active' : ''} onClick={() => set('plan_unit', u.value)}>{u.label}</button>
++              ))}
++            </div>
++            {form.plan_unit !== 'day' && <label className="plan-period-length">
++              <input aria-label="루틴 기간 길이" type="number" min={1} max={MAX_PLAN_LENGTH} className="text-input" value={form.plan_length}
++                onChange={(e) => set('plan_length', e.target.value)} />
++              <span>{form.plan_unit === 'week' ? '주' : '개월'} 동안</span>
++            </label>}
++          </div>
++          <p className="muted" style={{ margin: '4px 0 0' }}>{form.plan_unit === 'day' ? '오늘 한 번 할 루틴을 만듭니다.' : `1–${MAX_PLAN_LENGTH}${form.plan_unit === 'week' ? '주' : '개월'} 중에서 정합니다. 4주가 넘으면 중간에 재측정 후 다시 생성하기를 권장합니다.`}</p>
++        </div>
++        <div className="profile-grid">
++          <div>
++            <label className="field-label" htmlFor="rc-goal">운동 목적</label>
++            <select id="rc-goal" className="text-input" value={form.goal} onChange={(e) => set('goal', e.target.value)}>
++              {GOAL_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
++            </select>
++          </div>
++          {form.plan_unit !== 'day' && <div>
++            <label className="field-label" htmlFor="rc-days">주당 운동 일수</label>
++            <input id="rc-days" type="number" min={1} max={7} className="text-input" value={form.days_per_week} onChange={(e) => set('days_per_week', e.target.value)} />
++          </div>}
++          <div>
++            <label className="field-label" htmlFor="rc-minutes">회당 운동 시간(분)</label>
++            <input id="rc-minutes" type="number" min={10} max={180} className="text-input" value={form.minutes_per_session} onChange={(e) => set('minutes_per_session', e.target.value)} />
++          </div>
++          <div>
++            <label className="field-label" htmlFor="rc-mode">운동 방식</label>
++            <select id="rc-mode" className="text-input" value={form.training_mode || 'mixed'} onChange={(e) => set('training_mode', e.target.value)}>
++              <option value="mixed">장비와 맨몸 함께</option><option value="bodyweight">맨몸운동만</option><option value="equipment">헬스장·장비 운동 우선</option>
++            </select>
++          </div>
++          <div>
++            <label className="field-label" htmlFor="rc-location">운동 장소</label>
++            <select id="rc-location" className="text-input" value={form.exercise_location} onChange={(e) => set('exercise_location', e.target.value)}>
++              {LOCATION_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
++            </select>
++          </div>
++        </div>
++
++        <p className="muted" style={{ marginTop: 10 }}>운동 경험: <strong>{EXPERIENCE_LABELS[form.experience_level] || '초급'}</strong> · <Link to="/health/profile">프로필에서 변경</Link></p>
++
++        <div style={{ marginTop: 14 }}>
++          <label className="field-label">이용할 수 있는 운동 기구</label>
++          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
++            {EQUIPMENT_OPTIONS.map((o) => (
++              <label key={o.value} className={`chip-checkbox ${equipment.has(o.value) ? 'checked' : ''}`}>
++                <input type="checkbox" checked={equipment.has(o.value)} onChange={() => toggleEquipment(o.value)} />
++                {o.label}
++              </label>
++            ))}
++          </div>
++        </div>
++
++        <div style={{ marginTop: 18 }}>
++          <label className="field-label">집중할 부위 (선택)</label>
++          <p className="muted" style={{ margin: '2px 0 8px' }}>고른 부위는 먼저 배치하고 시간 안에서 1세트를 더합니다. 고르지 않으면 전신을 고르게 구성합니다.</p>
++          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
++            {REGION_FOCUS_OPTIONS.map((region) => {
++              const checked = form.focus_regions.includes(region.value);
++              return (
++                <label key={region.value} className={`chip-checkbox ${checked ? 'checked' : ''}`} title={region.hint}>
++                  <input type="checkbox" checked={checked} onChange={() => toggleFocus(region.value)} />
++                  {region.label}<span className="muted" style={{ fontSize: '.72rem' }}>{region.hint}</span>
++                </label>
++              );
++            })}
++          </div>
++        </div>
++
++        <div style={{ marginTop: 14 }}>
++          <label className="field-label" htmlFor="rc-limitations">제약 사항 (쉼표로 구분)</label>
++          <input id="rc-limitations" className="text-input" value={limitationsText} onChange={(e) => setLimitationsText(e.target.value)} placeholder="예: 무릎 통증, 허리 디스크" />
++        </div>
++        <div style={{ marginTop: 14 }}>
++          <label className="field-label" htmlFor="rc-preferences">선호 사항 (쉼표로 구분)</label>
++          <input id="rc-preferences" className="text-input" value={preferencesText} onChange={(e) => setPreferencesText(e.target.value)} placeholder="예: 스쿼트" />
++        </div>
++      </fieldset>
++      <p className="muted" style={{ fontSize: '.8rem' }}>안전 문진은 <Link to="/health/profile">프로필</Link>에서 확인합니다. 해당 항목이 있으면 루틴을 만들지 않습니다.</p>
++      {error && <ErrorState message={error.message} onRetry={confirm} />}
++      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
++        <button className="btn btn-primary" onClick={confirm} disabled={disabled}>{disabled ? '생성 중...' : '이 조건으로 루틴 생성'}</button>
++        {onCancel && <button className="btn btn-ghost" onClick={onCancel} disabled={disabled}>취소</button>}
++      </div>
++    </Card>
++  );
++}
+diff --git a/frontend/src/health/components/exercise/CameraCoaching.jsx b/frontend/src/health/components/exercise/CameraCoaching.jsx
+index 2a576a7..ba39a1b 100644
+--- a/frontend/src/health/components/exercise/CameraCoaching.jsx
++++ b/frontend/src/health/components/exercise/CameraCoaching.jsx
+@@ -200,7 +200,7 @@ export default function CameraCoaching({motion='squat',paused=false,onEvaluation
+     {feedback&&<div className={`coach-feedback${issues.length?' coach-feedback-adjust':''}`} role="status" aria-live="polite"><div className="coach-feedback-heading"><strong>{preparing?'피드백 준비 중…':result?.message||'전신이 화면에 들어오도록 위치를 잡아 주세요.'}</strong>{result?.detected&&<span className="coach-counter">{result.seconds!=null?`${result.seconds}초`:result.count_supported===false?'자세 관찰':`${result.reps}회`}</span>}</div>{result&&<p>{result.detected?(issues[0]?.bodyPart?`${issues[0].bodyPart} · 빨간 관절 부위를 확인하세요`:'관절을 추적하며 동작을 확인하고 있어요'):'추적 불확실 · 자세 판정 보류'}</p>}</div>}
+    </div>
+   </div>
+-  {standaloneSession&&externalPlayback===undefined&&tempo.state.status==='complete'&&<WorkoutResults exercises={tempoExercises} skipped={tempo.state.skipped} workMs={tempo.state.workMs}/>}
++  {standaloneSession&&externalPlayback===undefined&&tempo.state.status==='complete'&&<WorkoutResults exercises={tempoExercises} skipped={tempo.state.skipped}/>}
+   <div className="coach-control-panel">{profile&&<p className="coach-capability-note">{profile.cameraView} 촬영 · {profile.limitation}</p>}{!analysisSupported&&<p className="coach-capability-note">동영상 촬영 가능 · 실시간 교정 미지원</p>}
+    <div className="coach-recording-actions" aria-label="운동 동영상 촬영">
+     {recordedClip?<div className="coach-recording-save-actions"><button type="button" className="btn btn-primary" disabled={saving} onClick={()=>saveRecording()}><Download size={16} aria-hidden="true"/>{saving?'저장 중…':'휴대폰에 저장'}</button><button type="button" className="btn btn-secondary" disabled={saving} onClick={()=>saveRecording(true)}><Share2 size={16} aria-hidden="true"/>공유</button><button type="button" className="btn btn-ghost coach-discard" aria-label="촬영 영상 버리기" disabled={saving} onClick={clearRecording}><Trash2 size={17} aria-hidden="true"/></button></div>:<><button type="button" className={`btn coach-record-button${recording?' is-recording':''}`} disabled={busy||paused||finishing||recordPending||layout==='demo'} onClick={()=>recording?recordingSession.current?.stop():startRecording()}>{recording?<Square size={16} aria-hidden="true"/>:<Video size={17} aria-hidden="true"/>}{recording?'촬영 종료':finishing?'영상 준비 중…':recordPending?'촬영 준비 중…':'동영상 촬영'}</button><span className="coach-recording-meta">{analysisSupported?'촬영 + 자세 분석':'영상 촬영'} · 최대 {MAX_RECORDING_SECONDS}초<br/>저장 전에는 기기 메모리에만</span></>}
+diff --git a/frontend/src/health/components/exercise/ExerciseMotion.jsx b/frontend/src/health/components/exercise/ExerciseMotion.jsx
+index 253ad27..db200bc 100644
+--- a/frontend/src/health/components/exercise/ExerciseMotion.jsx
++++ b/frontend/src/health/components/exercise/ExerciseMotion.jsx
+@@ -79,7 +79,7 @@ export default function ExerciseMotion({ exercise, measurement, profile, autoPla
+     document.addEventListener('visibilitychange', hide);
+     return () => { cancelAnimationFrame(frame); document.removeEventListener('visibilitychange', hide); };
+   }, [playing, speed, motion, loop, guide?.durationMs, !!playback, dimension, sceneReady]);
+-  if(standaloneSession&&externalPlayback===undefined&&tempo.state.status==='complete')return <div className="exercise-motion-results"><TempoControls session={tempo} exercises={tempoExercises} disabled={paused}/><WorkoutResults exercises={tempoExercises} measurement={measurement} skipped={tempo.state.skipped} workMs={tempo.state.workMs}/></div>;
++  if(standaloneSession&&externalPlayback===undefined&&tempo.state.status==='complete')return <div className="exercise-motion-results"><TempoControls session={tempo} exercises={tempoExercises} disabled={paused}/><WorkoutResults exercises={tempoExercises} skipped={tempo.state.skipped}/></div>;
+   if (!motion) return <p className="muted">이전 버전 운동입니다. 루틴을 다시 생성하면 동작 안내를 볼 수 있습니다.</p>;
+   const setPhase = value => { setPlaying(false); phase.current = value; setProgress(value); };
+   const playPause = () => { if (!playing && phase.current >= 1) { phase.current = 0; setProgress(0); } setPlaying(p => !p); };
+diff --git a/frontend/src/health/components/exercise/ExerciseMotion3D.jsx b/frontend/src/health/components/exercise/ExerciseMotion3D.jsx
+index 63034c6..2e02a89 100644
+--- a/frontend/src/health/components/exercise/ExerciseMotion3D.jsx
++++ b/frontend/src/health/components/exercise/ExerciseMotion3D.jsx
+@@ -5,6 +5,7 @@ import React, { useMemo, useEffect, useRef, useState } from 'react';
+ import { Canvas, useThree } from '@react-three/fiber';
+ import { OrbitControls, ContactShadows, useTexture } from '@react-three/drei';
+ import * as THREE from 'three';
++import { RotateCcw, RotateCw } from 'lucide-react';
+ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+ import maleFaceAtlas from '../character/assets/male-face.webp';
+ import femaleFaceAtlas from '../character/assets/female-face.webp';
+@@ -34,6 +35,15 @@ export { exerciseCameraPreset } from './exerciseCamera.js';
+ 
+ export {exerciseShoeFloor,heelContactHeights} from './athleteModel.js';
+ 
++// Orbit the camera around the current target by 45° steps; drag rotation stays available.
++function rotateView(controls, direction) {
++  const orbit = controls.current;
++  if (!orbit) return;
++  const offset = orbit.object.position.clone().sub(orbit.target).applyAxisAngle(new THREE.Vector3(0, 1, 0), direction * Math.PI / 4);
++  orbit.object.position.copy(orbit.target).add(offset);
++  orbit.update();
++}
++
+ function SceneCamera({ motion, view, mirror, heightScale, controls, faceFocus }) {
+   const { camera, size, invalidate } = useThree();
+   useEffect(() => {
+@@ -207,7 +217,7 @@ class SceneBoundary extends React.Component {
+   render() { return this.state.failed ? this.props.fallback : this.props.children; }
+ }
+ 
+-export default function ExerciseMotion3D({ motion, progress, mirror, measurement, profile, compact = false, defaultView, fallbackContent, onReady, character: overrideCharacter, highlight=true, faceFocus=false }) {
++export default function ExerciseMotion3D({ motion, progress, mirror, measurement, profile, compact = false, defaultView, fallbackContent, onReady, character: overrideCharacter, highlight=true, faceFocus=false, angleControls=false }) {
+   const controls = useRef();
+   const savedCharacter = useCharacter();
+   const character = overrideCharacter || savedCharacter;
+@@ -227,12 +237,16 @@ export default function ExerciseMotion3D({ motion, progress, mirror, measurement
+       <button type="button" aria-pressed={appearance === 'mannequin'} onClick={() => setAppearance('mannequin')}>부위 강조 인체</button>
+       <button type="button" aria-pressed={appearance === 'athlete'} onClick={() => setAppearance('athlete')}>운동복 인체</button>
+     </div>}
+-    <div className="motion-controls motion-view-controls">{compact ? <select aria-label="운동 시범 방향" value={view} onChange={event => setView(event.target.value)}><option value="front">정면</option><option value="45">45°</option><option value="side">측면</option></select> : [['front', '정면'], ['45', '45°'], ['side', '측면'], ['back', '후면'], ['free', '자유']].map(([id, label]) => <button key={id} type="button" className="btn btn-ghost" aria-label={`${label} 운동 시범 보기`} aria-pressed={view === id} onClick={() => setView(id)}>{label}</button>)}</div>
++    {angleControls ? <div className="motion-controls motion-view-controls">{compact ? <select aria-label="운동 시범 방향" value={view} onChange={event => setView(event.target.value)}><option value="front">정면</option><option value="45">45°</option><option value="side">측면</option></select> : [['front', '정면'], ['45', '45°'], ['side', '측면'], ['back', '후면'], ['free', '자유']].map(([id, label]) => <button key={id} type="button" className="btn btn-ghost" aria-label={`${label} 운동 시범 보기`} aria-pressed={view === id} onClick={() => setView(id)}>{label}</button>)}</div>
++    : <div className="motion-controls motion-view-controls" role="group" aria-label="시범 회전">
++      <button type="button" className="btn btn-ghost" aria-label="왼쪽으로 회전" onClick={() => rotateView(controls, -1)}><RotateCcw size={16}/> 회전</button>
++      <button type="button" className="btn btn-ghost" aria-label="오른쪽으로 회전" onClick={() => rotateView(controls, 1)}>회전 <RotateCw size={16}/></button>
++    </div>}
+     <div className="motion-3d-canvas" style={{ position: 'relative', height: compact ? undefined : 340, flex: compact ? '1 1 0' : undefined, minHeight: compact ? 0 : undefined, touchAction: 'none' }}>
+       <SceneBoundary motion={motion} fallback={fallback}><React.Suspense fallback={<p className="motion-loading" role="status">캐릭터를 준비하고 있습니다.</p>}><Canvas shadows={!compact} dpr={[1, compact ? 1.5 : 2]} frameloop="demand" gl={{ antialias: true, alpha: true, powerPreference: 'low-power' }} camera={{ position: [3, 1.5, 3], fov: 36 }} fallback={fallback} aria-label={appearance === 'mannequin' ? '운동 부위를 강조한 3D 운동 시범' : '운동복을 입은 3D 운동 시범'}>
+         <SceneCamera motion={motion} view={view} mirror={mirror} heightScale={heightScale} controls={controls} faceFocus={faceFocus}/><Studio compact={compact} heightScale={heightScale} motion={motion} portrait={faceFocus}/>
+         <Athlete {...{ motion, progress, mirror, compact, appearance, onReady, character, highlight }} measurement={m} profile={p}/>
+-        <OrbitControls ref={controls} enabled={view === 'free'} enablePan={false} minDistance={(faceFocus ? .38 : 1.2) * heightScale} maxDistance={(faceFocus ? .95 : 6) * heightScale} maxPolarAngle={Math.PI / 2 - .02}/>
++        <OrbitControls ref={controls} enabled={view === 'free' || !angleControls} enablePan={false} minDistance={(faceFocus ? .38 : 1.2) * heightScale} maxDistance={(faceFocus ? .95 : 6) * heightScale} maxPolarAngle={Math.PI / 2 - .02}/>
+       </Canvas></React.Suspense></SceneBoundary>
+       {compact && highlight && anatomy.primary.length > 0 && <span className="motion-anatomy-badge" title={`주요 부위: ${anatomy.primaryLabel}. 운동 안내이며 실제 근육 사용량 측정이 아닙니다.`}>빨강 · 주요 운동 부위</span>}
+     </div>
+@@ -241,6 +255,6 @@ export default function ExerciseMotion3D({ motion, progress, mirror, measurement
+       {!compact && anatomy.secondary.length > 0 && <span><i className="secondary"/>보조 부위 · {anatomy.secondaryLabel}</span>}
+       <small>{anatomy.primary.length ? '색상은 운동 부위 안내이며 실제 근육 사용량 측정이 아닙니다.' : '이 동작은 특정 근육 색상 없이 전신 움직임을 안내합니다.'}</small>
+     </div>}
+-    {!compact && <p className="muted">{measurement ? '나의 체형' : '표준 시범 체형'} · 자유 방향에서 드래그로 돌려 보세요.</p>}
++    {!compact && <p className="muted">{measurement ? '나의 체형' : '표준 시범 체형'} · {angleControls ? '자유 방향에서 드래그로 돌려 보세요.' : '드래그하거나 회전 버튼으로 돌려 보세요.'}</p>}
+   </>;
+ }
+diff --git a/frontend/src/health/components/exercise/StretchRecovery.jsx b/frontend/src/health/components/exercise/StretchRecovery.jsx
+index 6d6353b..ebb0be6 100644
+--- a/frontend/src/health/components/exercise/StretchRecovery.jsx
++++ b/frontend/src/health/components/exercise/StretchRecovery.jsx
+@@ -20,7 +20,9 @@ export default function StretchRecovery({exercises=[],pain=false,autoStart=true}
+  useEffect(()=>{
+   if(!running||!selected)return;
+   let last=performance.now();
+-  const tick=setInterval(()=>{const now=performance.now(),delta=(now-last)/1000;last=now;if(document.hidden||delta>1.5){setRunning(false);return;}setElapsed(old=>Math.min(duration,old+delta));},1000/30);
++  // Loading the next stretch's 3D model can stall a frame; skip that gap instead of pausing,
++  // so the sequence keeps advancing. Leaving the screen still pauses.
++  const tick=setInterval(()=>{const now=performance.now(),delta=(now-last)/1000;last=now;if(document.hidden){setRunning(false);return;}if(delta>1.5)return;setElapsed(old=>Math.min(duration,old+delta));},1000/30);
+   const hide=()=>{if(document.hidden)setRunning(false);};document.addEventListener('visibilitychange',hide);
+   return()=>{clearInterval(tick);document.removeEventListener('visibilitychange',hide);};
+  },[running,selected,duration]);
+@@ -37,7 +39,8 @@ export default function StretchRecovery({exercises=[],pain=false,autoStart=true}
+  },[voice,running,selected,index,preparing,side,seconds]);
+  useEffect(()=>()=>stopWorkoutSpeech('recovery'),[]);
+  const shown=all?STRETCHES.filter(s=>region==='전체'||s.regions.includes(region)):recommended;
+- function choose(s){setQueue([s]);setIndex(0);setElapsed(0);setPreparing(true);setRunning(!pain);}
++ // Picking from the full list continues through the rest of that list automatically.
++ function choose(s){const list=shown.slice(shown.indexOf(s));setQueue(list);setIndex(0);setElapsed(0);setPreparing(true);setRunning(!pain);}
+  function skip(){setIndex(i=>i+1);setElapsed(0);setPreparing(true);if(index+1>=queue.length)setRunning(false);}
+  function restart(){setQueue(recommended);setIndex(0);setElapsed(0);setPreparing(true);setRunning(!pain);}
+  return <section className="stretch-recovery" aria-label="운동 후 스트레칭">
+@@ -52,7 +55,7 @@ export default function StretchRecovery({exercises=[],pain=false,autoStart=true}
+    <ExerciseMotion3D key={selected.id} motion={selected.motion_id} progress={progress} mirror={!!side} defaultView={FLOOR_STRETCHES.has(selected.motion_id)||selected.id==='triceps'?'45':'front'} fallbackContent={<StretchDiagram motion={selected.motion_id} progress={progress} mirror={!!side}/>}/>
+    <div className="stretch-clock" role="timer" aria-label="스트레칭 남은 시간"><strong>{Math.ceil(Math.max(0,duration-elapsed))}초</strong><span>{!preparing&&selected.bilateral?(side?'반대쪽 · ':'첫 번째 쪽 · '):''}{phase}</span></div>
+    <p>{selected.cue}</p><p className="stretch-caution">{selected.caution}</p>
+-   <p className="muted">다음: {queue[index+1]?.name||'마무리'} · 동작 사이 5초 준비. 화면을 벗어나면 멈추며, 이 시간은 운동 칼로리에 자동 추가되지 않습니다.</p>
++   <p className="muted">다음: {queue[index+1]?.name||'마무리'} · 동작 사이 5초 준비. 한 동작이 끝나면 다음 동작으로 자동으로 넘어가며, 화면을 벗어나면 멈춥니다.</p>
+   </article>}
+   <div className="recovery-tabs"><button type="button" className="btn btn-secondary" aria-pressed={!all} onClick={()=>setAll(false)}>추천 순서 보기</button><button type="button" className="btn btn-secondary" aria-pressed={all} onClick={()=>setAll(true)}>전체 30가지 · 동작 바꾸기</button></div>
+   {all&&<label>늘릴 부위<select value={region} onChange={e=>setRegion(e.target.value)}>{['전체',...new Set(STRETCHES.flatMap(s=>s.regions))].map(r=><option key={r}>{r}</option>)}</select></label>}
+diff --git a/frontend/src/health/components/exercise/TempoWorkout.jsx b/frontend/src/health/components/exercise/TempoWorkout.jsx
+index 47eada4..b9f20d4 100644
+--- a/frontend/src/health/components/exercise/TempoWorkout.jsx
++++ b/frontend/src/health/components/exercise/TempoWorkout.jsx
+@@ -6,7 +6,7 @@ import CameraCoaching from './CameraCoaching.jsx';
+ import WorkoutResults from './WorkoutResults.jsx';
+ import {coachingMotionId} from './coachingCatalog.js';
+ 
+-export default function TempoWorkout({exercises,onClose,measurement,autoStart=false}){
++export default function TempoWorkout({exercises,onClose,autoStart=false}){
+  const session=useTempoSession(exercises),[stopped,setStopped]=useState(false);
+  const current=useRef(session);current.current=session;
+  useEffect(()=>{if(!autoStart)return;const timer=setTimeout(()=>current.current.start(),0);return()=>clearTimeout(timer);},[autoStart]);
+@@ -15,7 +15,7 @@ export default function TempoWorkout({exercises,onClose,measurement,autoStart=fa
+  const motion=coachingMotionId(exercise.motion_id);
+  return <section className={`tempo-workout${session.state.status!=='complete'&&!stopped?' tempo-workout-live':''}`}><header><div><h2>자동 운동 따라하기</h2><p>{exercise.exercise_name||exercise.name}</p></div><button type="button" className="btn btn-secondary" onClick={onClose}>실제 수행 기록하기</button></header>
+   <TempoControls compact session={session} exercises={exercises} disabled={stopped}/>
+-  {session.state.status==='complete'?<WorkoutResults exercises={exercises} measurement={measurement} skipped={session.state.skipped} workMs={session.state.workMs}/>:stopped?<p role="alert">통증으로 운동을 중단했습니다. 편하게 쉬고 실제 수행 기록에 통증을 남겨 주세요.</p>:<><button type="button" className="btn btn-secondary" onClick={()=>{session.pause();setStopped(true);}}>통증이 있어 중단</button>
++  {session.state.status==='complete'?<WorkoutResults exercises={exercises} skipped={session.state.skipped}/>:stopped?<p role="alert">통증으로 운동을 중단했습니다. 편하게 쉬고 실제 수행 기록에 통증을 남겨 주세요.</p>:<><button type="button" className="btn btn-secondary" onClick={()=>{session.pause();setStopped(true);}}>통증이 있어 중단</button>
+    {motion?<CameraCoaching continuousSession immersive standaloneSession={false} motion={motion} playback={session.playback} paused={session.state.status==='paused'} exercise={exercise}/>:<ExerciseMotion exercise={exercise} playback={session.playback}/>}
+   </>}
+  </section>;
+diff --git a/frontend/src/health/components/exercise/WorkoutMode.jsx b/frontend/src/health/components/exercise/WorkoutMode.jsx
+index 280cc31..a63b5d2 100644
+--- a/frontend/src/health/components/exercise/WorkoutMode.jsx
++++ b/frontend/src/health/components/exercise/WorkoutMode.jsx
+@@ -12,7 +12,7 @@ import React,{useEffect,useState,useRef,useCallback} from 'react';
+ import ExerciseCard from './ExerciseCard.jsx';
+ import {HealthAPI} from '../../../shared/lib/api.js';
+ const localDate=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
+-export default function WorkoutMode({routine,exercises,workouts=[],onSaved,onClose,measurement}){
++export default function WorkoutMode({routine,exercises,workouts=[],onSaved,onClose}){
+  const [skipped,setSkipped]=useState([]);
+  const [poseEvaluation,setPoseEvaluation]=useState(null);
+  const [exerciseDrafts,setExerciseDrafts]=useState({});
+@@ -81,7 +81,7 @@ export default function WorkoutMode({routine,exercises,workouts=[],onSaved,onClo
+  }catch(e){setError(e.message);}finally{setBusy(false);}}
+  async function skipExercise(){if(busy||!draft.ready)return;pause();setRestUntil(null);setRemaining(0);const nextSkipped=[...new Set([...skipped,index])];setSkipped(nextSkipped);const next=exercises.findIndex((e,i)=>i>index&&!nextSkipped.includes(i)&&!records.some(r=>r.routine_exercise_id===e.exercise_id));if(next<0){setFinished(true);await draft.flush();}else{navigate(next);setRestUntil(null);}notify('이 운동을 건너뛰었습니다.');}
+  const minutes=records.reduce((s,r)=>s+(r.actual_minutes||0),0),ratings=records.filter(r=>r.rpe!=null);
+- if(finished)return <section className="workout-mode"><h2>오늘의 운동 요약</h2><p>{records.length}개 운동 · {records.reduce((s,r)=>s+(r.sets_completed||0),0)}세트 · {minutes.toFixed(1)}분</p><p>완료 {Math.round(records.filter(r=>r.completed).length/exercises.length*100)}% · 통증 {Math.max(0,...records.map(r=>r.pain||0))} · 평균 힘듦 {ratings.length?(ratings.reduce((s,r)=>s+r.rpe,0)/ratings.length).toFixed(1):'미기록'}</p><ul>{records.map((r,i)=><li key={`${r.id||'record'}-${i}`}>{r.exercise_name} · 계획 {exercises.find(e=>e.exercise_id===r.routine_exercise_id)?.sets}세트 × {exercises.find(e=>e.exercise_id===r.routine_exercise_id)?.reps} · 실제 {r.set_records?.map(s=>s.reps).join(' / ')||r.sets_completed+'세트'} · {WORKOUT_STATUS[r.completion_status]||(r.completed?'완료':'일부 수행')}</li>)}</ul>{records.some(r=>r.pending_sync)&&<p role="status">일부 기록은 기기 임시 보관 중입니다. 같은 계정으로 다시 로그인하면 전송을 이어갑니다.</p>}{records.some(r=>r.pain>0)&&<p role="alert">통증이 기록되어 진행을 중단했습니다. 건강센터에 상담하세요.</p>}<p>{skipped.length}개 운동 건너뜀 · 건너뛴 입력은 완료로 저장되지 않았습니다.</p><WorkoutResults exercises={exercises} records={records} measurement={measurement} skipped={skipped}/><button className="btn btn-primary" onClick={onClose}>목록으로</button></section>;
++ if(finished)return <section className="workout-mode"><h2>오늘의 운동 요약</h2><p>{records.length}개 운동 · {records.reduce((s,r)=>s+(r.sets_completed||0),0)}세트 · {minutes.toFixed(1)}분</p><p>완료 {Math.round(records.filter(r=>r.completed).length/exercises.length*100)}% · 통증 {Math.max(0,...records.map(r=>r.pain||0))} · 평균 힘듦 {ratings.length?(ratings.reduce((s,r)=>s+r.rpe,0)/ratings.length).toFixed(1):'미기록'}</p><ul>{records.map((r,i)=><li key={`${r.id||'record'}-${i}`}>{r.exercise_name} · 계획 {exercises.find(e=>e.exercise_id===r.routine_exercise_id)?.sets}세트 × {exercises.find(e=>e.exercise_id===r.routine_exercise_id)?.reps} · 실제 {r.set_records?.map(s=>s.reps).join(' / ')||r.sets_completed+'세트'} · {WORKOUT_STATUS[r.completion_status]||(r.completed?'완료':'일부 수행')}</li>)}</ul>{records.some(r=>r.pending_sync)&&<p role="status">일부 기록은 기기 임시 보관 중입니다. 같은 계정으로 다시 로그인하면 전송을 이어갑니다.</p>}{records.some(r=>r.pain>0)&&<p role="alert">통증이 기록되어 진행을 중단했습니다. 건강센터에 상담하세요.</p>}<p>{skipped.length}개 운동 건너뜀 · 건너뛴 입력은 완료로 저장되지 않았습니다.</p><WorkoutResults exercises={exercises} records={records} skipped={skipped}/><button className="btn btn-primary" onClick={onClose}>목록으로</button></section>;
+  if(!exercise)return null;
+  return <section className="workout-mode"><div className="motion-controls"><h2>운동 따라하기 · {index+1} / {exercises.length}</h2><button className="btn btn-ghost" disabled={busy} onClick={leave}>목록으로</button></div><div className="workout-mode-actions"><button type="button" className="btn btn-secondary" disabled={busy} onClick={paused?resume:pause}>{paused?'운동 계속하기':'잠시 멈추기'}</button><button type="button" className="btn btn-ghost" disabled={busy} onClick={async()=>{if(window.confirm('진행 중 임시 입력을 버릴까요? 이미 저장한 운동 기록은 유지됩니다.')){await draft.clear();onClose();}}}>임시 입력 버리기</button><span className="muted">화면을 벗어나면 자동 일시정지됩니다.</span></div>{paused&&<div role="status" className="workout-mode-paused">일시정지 중 · 운동 기록 시간이 멈췄어요. 휴식은 실제 시간 기준으로 진행됩니다. 준비되면 계속하기를 눌러 주세요.</div>}{resumePrompt&&<div role="alert"><p>진행 중인 운동이 있습니다.</p><button className="btn btn-primary" onClick={resume}>이어하기</button><button className="btn btn-secondary" onClick={leave}>종료 · 임시 저장 유지</button></div>}<p className="muted">기록 날짜 {recordDate}</p>{draft.status&&<p role="status">{draft.status}</p>}{draft.error&&<p role="alert">{draft.error}</p>}<ExerciseCard focused onPoseEvaluation={setPoseEvaluation} key={exercise.exercise_id} exercise={exercise} paused={paused||busy||!!restUntil||Number(pain)>0}/><h3>세트 {Math.min(sets+1,exercise.sets||1)} / {exercise.sets||1} · 완료 {sets}</h3>
+   {previous&&<p>지난 기록 ({previous.date}): {previous.set_records?.length?previous.set_records.map(s=>`${s.weight_kg??'미기록'}kg × ${s.reps}회`).join(' / '):`${previous.sets_completed??'—'}세트`}</p>}
+diff --git a/frontend/src/health/components/exercise/WorkoutResults.jsx b/frontend/src/health/components/exercise/WorkoutResults.jsx
+index f0e6f5b..517c155 100644
+--- a/frontend/src/health/components/exercise/WorkoutResults.jsx
++++ b/frontend/src/health/components/exercise/WorkoutResults.jsx
+@@ -1,29 +1,13 @@
+-import React,{useEffect,useRef,useState} from 'react';
+-import {CALORIE_SOURCE,calorieActivity,calorieOptions,estimateCalories,recordedActiveMinutes} from './workoutCalories.js';
++import React,{useEffect,useRef} from 'react';
+ import StretchRecovery from './StretchRecovery.jsx';
+ import './recovery.css';
+ 
+-export default function WorkoutResults({exercises,measurement,records:recordedWork,skipped=[],workMs={}}){
++export default function WorkoutResults({exercises,records:recordedWork,skipped=[]}){
+  const records=recordedWork||[],container=useRef(null);
+  useEffect(()=>{if(!records.some(record=>record.pain>0))container.current?.scrollIntoView?.({block:'start',behavior:'auto'});},[]);
+- const [weight,setWeight]=useState(()=>String(measurement?.weight_kg??measurement?.weight??''));
+- const [rows,setRows]=useState(()=>exercises.map((ex,i)=>({minutes:skipped.includes(i)?'0':recordedActiveMinutes(records.find(r=>r.routine_exercise_id===ex.exercise_id)),met:String(calorieActivity(ex).met)})));
+- const [confirmed,setConfirmed]=useState(false),[error,setError]=useState('');
+- function change(i,key,value){setConfirmed(false);setError('');setRows(old=>old.map((r,j)=>i===j?{...r,[key]:value}:r));}
+- const estimates=rows.map(r=>r.minutes.trim()===''?null:estimateCalories(Number(weight),Number(r.minutes),Number(r.met)));
+- const total=estimates.reduce((s,v)=>s+(v?.gross||0),0),active=estimates.reduce((s,v)=>s+(v?.active||0),0);
+- const muscle=measurement?.skeletal_muscle_mass??measurement?.skeletal_muscle_mass_kg;
+- const performed=exercises.filter((_,i)=>confirmed?Number(rows[i].minutes)>0:!skipped.includes(i)&&(recordedWork===undefined||records.some(r=>r.routine_exercise_id===exercises[i].exercise_id&&(r.sets_completed>0||r.performed_seconds>0))));
++ const performed=exercises.filter((_,i)=>!skipped.includes(i)&&(recordedWork===undefined||records.some(r=>r.routine_exercise_id===exercises[i].exercise_id&&(r.sets_completed>0||r.performed_seconds>0))));
+  return <section ref={container} className="workout-results" aria-label="운동 결과와 회복">
+-  <header><span className="recovery-kicker">WORKOUT COMPLETE</span><h2>오늘의 운동 결과</h2><p>실제로 움직인 시간을 확인하면 예상 소모 칼로리를 보여드려요.</p></header>
+-  <StretchRecovery exercises={performed} pain={records.some(r=>r.pain>0)}/><h3>칼로리 확인</h3>
+-  <div className="recovery-measurements"><label>계산할 몸무게 (kg)<input type="number" min="20" max="350" step="0.1" value={weight} onChange={e=>{setWeight(e.target.value);setConfirmed(false);}}/></label><p>최근 골격근량 <strong>{Number.isFinite(muscle)?`${muscle} kg`:'미입력'}</strong><small>골격근량은 신체 정보로 표시합니다. 근육량만으로 운동 칼로리를 정확히 환산할 수 없어 계산 계수로 사용하지 않습니다.</small></p></div>
+-  <form onSubmit={e=>{e.preventDefault();if(estimates.some(v=>v===null)){setError('몸무게 20~350kg, 각 운동의 실제 시간 0~240분을 입력하세요. 안 한 운동은 0분입니다.');return;}setError('');setConfirmed(true);}}>
+-   {Object.values(workMs).some(ms=>ms>0)&&<div><button type="button" className="btn btn-secondary" onClick={()=>{setConfirmed(false);setError('');setRows(old=>old.map((r,i)=>r.minutes===''&&workMs[i]>0?{...r,minutes:String(Math.min(240,Math.round(workMs[i]/60000*100)/100))}:r));}}>빈 시간에 운동 타이머 값 가져오기</button><p>준비·휴식을 뺀 시범 진행 시간입니다. 실제로 따라 한 시간으로 수정한 뒤 계산하세요. 직접 입력한 시간과 건너뛴 운동은 유지합니다.</p></div>}
+-   <div className="calorie-rows">{exercises.map((ex,i)=><fieldset key={ex.exercise_id||`${ex.motion_id}-${i}`}><legend>{ex.exercise_name||ex.name}{skipped.includes(i)?' · 건너뜀':''}</legend>{workMs[i]>0&&<small>시범 진행 {(workMs[i]/60000).toFixed(1)}분 · 실제 수행 시간은 직접 확인하세요.</small>}<label>실제 운동 시간 (분)<input aria-label={`${ex.exercise_name||ex.name} 실제 운동 분`} type="number" min="0" max="240" step="0.01" value={rows[i].minutes} onChange={e=>change(i,'minutes',e.target.value)}/></label><label>활동 강도<select aria-label={`${ex.exercise_name||ex.name} 활동 강도`} value={rows[i].met} onChange={e=>change(i,'met',e.target.value)}>{calorieOptions(ex).map(option=><option key={option.met} value={option.met}>{option.label} · {option.met} MET</option>)}</select></label>{confirmed&&<strong>약 {Math.round(estimates[i].gross)} kcal</strong>}</fieldset>)}</div>
+-   <p>준비·휴식·일시정지 시간은 빼고 입력하세요. 건너뛴 운동은 기본 0분이며, 일부 수행했다면 그 시간만 입력할 수 있습니다.</p>{error&&<p role="alert">{error}</p>}<button className="btn btn-primary" type="submit">실제 시간 확인 · 칼로리 계산</button>
+-  </form>
+-  {confirmed&&<div className="calorie-total" role="status"><span>운동 시간 동안의 예상 소모량</span><strong>약 {Math.round(total)} <small>kcal</small></strong><p>안정 시 소모를 뺀 추가 활동량 약 {Math.round(active)} kcal</p></div>}
+-  <details><summary>칼로리 계산 기준</summary><p>MET × 3.5 × 체중(kg) ÷ 200 × 실제 운동 시간(분). 활동 종류별 평균을 적용한 추정치로, 심박·중량·휴식·운동 숙련도에 따라 실제 값은 달라집니다. 이 화면의 입력은 계산용이며 완료 기록에 자동 저장되지 않습니다.</p><a href={CALORIE_SOURCE} target="_blank" rel="noreferrer">2024 Adult Compendium of Physical Activities</a></details>
++  <header><span className="recovery-kicker">WORKOUT COMPLETE</span><h2>오늘의 운동 결과</h2><p>수행한 운동에 맞춘 마무리 스트레칭을 이어서 진행합니다.</p></header>
++  <StretchRecovery exercises={performed} pain={records.some(r=>r.pain>0)}/>
+  </section>;
+ }
+diff --git a/frontend/src/health/components/exercise/recovery.css b/frontend/src/health/components/exercise/recovery.css
+index e272d1a..3bf144a 100644
+--- a/frontend/src/health/components/exercise/recovery.css
++++ b/frontend/src/health/components/exercise/recovery.css
+@@ -1 +1 @@
+-.workout-results{scroll-margin-top:84px}.workout-results,.stretch-recovery{padding:22px 0;color:#183654}.recovery-kicker{font-size:.72rem;font-weight:750;letter-spacing:.12em;color:#3572ae}.workout-results h2,.stretch-recovery h2{font-size:1.35rem;margin:.65rem 0}.workout-results p,.stretch-recovery p{line-height:1.7;color:#51677f}.recovery-measurements{display:grid;grid-template-columns:1fr 1fr;gap:20px;padding:20px;background:#f3f8fe;border:1px solid #d7e5f5;border-radius:18px}.recovery-measurements p{margin:0}.recovery-measurements strong,.recovery-measurements small{display:block}.recovery-measurements small{font-size:.78rem;margin-top:8px}.workout-results input:not([type=checkbox]),.workout-results select,.stretch-recovery select{display:block;width:100%;min-height:44px;background:white;border:1px solid #bed1e7;border-radius:9px;padding:8px;color:#183654;font:inherit}.calorie-rows{display:grid;gap:12px;margin:20px 0}.calorie-rows fieldset{display:grid;grid-template-columns:1fr 1fr;gap:14px;border:1px solid #d7e5f5;border-radius:14px;padding:14px;min-width:0}.calorie-rows legend{font-weight:650;padding:0 5px}.calorie-rows small,.calorie-rows strong{grid-column:1/-1}.calorie-total{background:#eaf3ff;border:1px solid #bcd7f8;border-radius:20px;padding:25px;margin:20px 0}.calorie-total>strong{display:block;font-size:2.7rem;color:#1657a5;font-variant-numeric:tabular-nums}.calorie-total strong small{font-size:1rem}.recovery-tabs{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}.stretch-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin:16px 0}.stretch-choice{text-align:left;padding:17px;background:#fff;border:1px solid #ccdeef;border-radius:14px;display:grid;gap:8px;color:#1d3e60;cursor:pointer}.stretch-choice:hover,.stretch-choice[aria-pressed=true]{border-color:#387bcc;background:#f0f7ff}.stretch-choice small,.stretch-choice span{font-size:.78rem;color:#54718d}.stretch-player{border:1px solid #c7daef;border-radius:20px;padding:18px;background:#f8fbff;margin-top:22px}.stretch-player>header{display:flex;align-items:center;justify-content:space-between;gap:8px}.stretch-player h3{margin:6px 0 14px}.stretch-clock{display:flex;align-items:center;gap:18px;padding:16px 0}.stretch-clock strong{font-size:2rem;color:#1e61a7;white-space:nowrap;font-variant-numeric:tabular-nums}.stretch-caution{background:white;border-left:3px solid #6995c7;padding:12px}.stretch-recovery{border-top:1px solid #dce8f4;margin-top:24px}.stretch-choice:focus-visible{outline:3px solid #2e76ca;outline-offset:2px}@media(max-width:520px){.recovery-measurements,.calorie-rows fieldset{grid-template-columns:1fr}.stretch-grid{grid-template-columns:1fr 1fr}.stretch-choice{padding:13px}.stretch-player{padding:12px}.stretch-clock{align-items:flex-start;gap:12px}.stretch-choice strong{font-size:.9rem}}
++.workout-results{scroll-margin-top:84px}.workout-results,.stretch-recovery{padding:22px 0;color:#183654}.recovery-kicker{font-size:.72rem;font-weight:750;letter-spacing:.12em;color:#3572ae}.workout-results h2,.stretch-recovery h2{font-size:1.35rem;margin:.65rem 0}.workout-results p,.stretch-recovery p{line-height:1.7;color:#51677f}.stretch-recovery select{display:block;width:100%;min-height:44px;background:white;border:1px solid #bed1e7;border-radius:9px;padding:8px;color:#183654;font:inherit}.recovery-tabs{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}.stretch-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin:16px 0}.stretch-choice{text-align:left;padding:17px;background:#fff;border:1px solid #ccdeef;border-radius:14px;display:grid;gap:8px;color:#1d3e60;cursor:pointer}.stretch-choice:hover,.stretch-choice[aria-pressed=true]{border-color:#387bcc;background:#f0f7ff}.stretch-choice small,.stretch-choice span{font-size:.78rem;color:#54718d}.stretch-player{border:1px solid #c7daef;border-radius:20px;padding:18px;background:#f8fbff;margin-top:22px}.stretch-player>header{display:flex;align-items:center;justify-content:space-between;gap:8px}.stretch-player h3{margin:6px 0 14px}.stretch-clock{display:flex;align-items:center;gap:18px;padding:16px 0}.stretch-clock strong{font-size:2rem;color:#1e61a7;white-space:nowrap;font-variant-numeric:tabular-nums}.stretch-caution{background:white;border-left:3px solid #6995c7;padding:12px}.stretch-recovery{border-top:1px solid #dce8f4;margin-top:24px}.stretch-choice:focus-visible{outline:3px solid #2e76ca;outline-offset:2px}@media(max-width:520px){.stretch-grid{grid-template-columns:1fr 1fr}.stretch-choice{padding:13px}.stretch-player{padding:12px}.stretch-clock{align-items:flex-start;gap:12px}.stretch-choice strong{font-size:.9rem}}
+diff --git a/frontend/src/health/components/exercise/workoutCalories.js b/frontend/src/health/components/exercise/workoutCalories.js
+deleted file mode 100644
+index 22dacdc..0000000
+--- a/frontend/src/health/components/exercise/workoutCalories.js
++++ /dev/null
+@@ -1,35 +0,0 @@
+-import catalog from '../../../shared/lib/localCatalog.json' with {type:'json'};
+-
+-// Activity-class estimates from the 2024 Adult Compendium (not measurements of a
+-// specific lift, muscle activation or this user's metabolism).
+-export const CALORIE_SOURCE='https://pacompendium.com/';
+-export function calorieActivity(exercise){
+- const ex={...catalog.find(e=>e.motion_id===exercise.motion_id),...exercise},id=ex.motion_id||'';
+- if(/stretch|chest_open|shoulder_roll|ankle_pump|cat_cow|thoracic_rotation/.test(id))return {met:2.3,label:'가벼운 스트레칭·가동성'};
+- if(id==='brisk_walk')return {met:4.8,label:'빠른 평지 걷기 · 약 5.6~6.3 km/h'};
+- if(/walk/.test(id))return {met:3,label:'느린 평지 걷기 · 약 4 km/h'};
+- if(id==='stationary_cycle')return {met:3.5,label:'실내 자전거 · 매우 가벼운 저항'};
+- if(id==='elliptical')return {met:5,label:'일립티컬 · 보통 강도'};
+- if(ex.training_type==='equipment')return {met:3.5,label:'저항 운동 · 가벼움~보통'};
+- return {met:3.8,label:'맨몸 운동 · 보통 강도'};
+-}
+-export function calorieOptions(exercise){
+- const base=calorieActivity(exercise),id=exercise.motion_id||'';
+- let extra=[];
+- if(/walk/.test(id))extra=[{met:3,label:'느린 평지 걷기 · 약 4 km/h'},{met:3.8,label:'보통 평지 걷기 · 약 4.5~5.5 km/h'},{met:4.8,label:'빠른 평지 걷기 · 약 5.6~6.3 km/h'}];
+- else if(id==='stationary_cycle')extra=[];
+- else if(id==='elliptical')extra=[{met:9,label:'일립티컬 · 강한 강도'}];
+- else if(base.met===3.5)extra=[{met:6,label:'저항 운동 · 강한 강도'}];
+- else if(base.met===3.8)extra=[{met:2.8,label:'맨몸 운동 · 가벼운 강도'},{met:6.5,label:'맨몸 저항 운동 · 높은 강도'}];
+- return [base,...extra.filter(option=>option.met!==base.met)];
+-}
+-export function estimateCalories(weightKg,minutes,met){
+- if(!Number.isFinite(weightKg)||weightKg<20||weightKg>350||!Number.isFinite(minutes)||minutes<0||minutes>240||!Number.isFinite(met)||met<1||met>15)return null;
+- return {gross:met*3.5*weightKg/200*minutes,active:(met-1)*3.5*weightKg/200*minutes};
+-}
+-export function recordedActiveMinutes(record){
+- if(!record)return '';
+- const seconds=record.timed_sets_seconds?.reduce((s,v)=>s+(Number.isFinite(v)&&v>0?v:0),0)||record.performed_seconds||0;
+- // actual_minutes includes preparation/rest and must never become active time.
+- return seconds>0?String(Math.round(seconds/60*100)/100):'';
+-}
+diff --git a/frontend/src/health/lib/exerciseProfileOptions.js b/frontend/src/health/lib/exerciseProfileOptions.js
+new file mode 100644
+index 0000000..d009b6f
+--- /dev/null
++++ b/frontend/src/health/lib/exerciseProfileOptions.js
+@@ -0,0 +1,72 @@
++import {EQUIPMENT_LABELS} from './exerciseLabels.js';
++
++// Shared by the profile screen and the routine-creation condition check.
++export const GOAL_OPTIONS = [
++  { value: 'MUSCLE_GAIN', label: '근력/근육량 향상' },
++  { value: 'FAT_MANAGEMENT', label: '체지방 관리' },
++  { value: 'GENERAL_FITNESS', label: '전반적인 체력 향상' },
++  { value: 'BALANCE', label: '좌우 균형 개선' },
++  { value: 'GENERAL_HEALTH', label: '일반 건강 관리' },
++];
++
++export const LOCATION_OPTIONS = [
++  { value: 'gym', label: '헬스장' },
++  { value: 'home', label: '홈트레이닝' },
++  { value: 'outdoor', label: '실외' },
++];
++
++export const EQUIPMENT_OPTIONS = Object.entries(EQUIPMENT_LABELS).filter(([value])=>value!=='none').map(([value,label])=>({value,label}));
++
++export const REGION_FOCUS_OPTIONS = [
++  { value: 'squat', label: '하체 앞쪽', hint: '허벅지·무릎 주변' },
++  { value: 'hinge', label: '엉덩이·허벅지 뒤', hint: '둔근·햄스트링' },
++  { value: 'push', label: '가슴·어깨', hint: '밀기 동작' },
++  { value: 'pull', label: '등', hint: '당기기 동작' },
++  { value: 'core', label: '복부·코어', hint: '몸통 안정' },
++];
++
++export const PLAN_UNITS = [
++  { value: 'day', label: '하루' },
++  { value: 'week', label: '주' },
++  { value: 'month', label: '개월' },
++];
++export const MAX_PLAN_LENGTH = 12;
++
++export function periodLabel(routine) {
++  if (routine.period_unit === 'day') return '하루 루틴';
++  if (routine.period_unit === 'month') return `${routine.period_length}개월 프로그램`;
++  return `${routine.period_length ?? routine.duration_weeks}주 프로그램`;
++}
++
++// Self-reported indicators, scored 0-3 in option order. Mirrors backend schemas.EXPERIENCE_SCORES.
++export const EXPERIENCE_INDICATORS = [
++  { key: 'training_history', label: '규칙적으로 운동한 기간', options: [['none', '처음 시작'], ['lt6m', '6개월 미만'], ['6m_2y', '6개월–2년'], ['gt2y', '2년 이상']] },
++  { key: 'weekly_sessions', label: '최근 3개월 주당 운동 횟수', options: [['0', '거의 안 함'], ['1_2', '1–2회'], ['3_4', '3–4회'], ['5plus', '5회 이상']] },
++];
++
++export const EXPERIENCE_LABELS = { BEGINNER: '초급', INTERMEDIATE: '중급', ADVANCED: '고급' };
++
++export function validExperienceDetail(detail) {
++  if (detail == null) return true;
++  if (typeof detail !== 'object' || Array.isArray(detail)) return false;
++  return Object.entries(detail).every(([key, value]) => {
++    const indicator = EXPERIENCE_INDICATORS.find((x) => x.key === key);
++    return indicator && (value == null || indicator.options.some(([v]) => v === value));
++  });
++}
++
++// Returns null until every indicator is answered; frequent sessions without history stay capped.
++export function deriveExperienceLevel(detail) {
++  if (!detail || EXPERIENCE_INDICATORS.some((x) => detail[x.key] == null)) return null;
++  const total = EXPERIENCE_INDICATORS.reduce((sum, x) => sum + x.options.findIndex(([v]) => v === detail[x.key]), 0);
++  let level = total <= 1 ? 0 : total <= 4 ? 1 : 2;
++  level = Math.min(level, { none: 0, lt6m: 1 }[detail.training_history] ?? 2);
++  return ['BEGINNER', 'INTERMEDIATE', 'ADVANCED'][level];
++}
++
++export function toCsv(list) {
++  return (list || []).join(', ');
++}
++export function fromCsv(text) {
++  return text.split(',').map((s) => s.trim()).filter(Boolean);
++}
+diff --git a/frontend/src/health/pages/CharacterPage.jsx b/frontend/src/health/pages/CharacterPage.jsx
+index e58382d..023824a 100644
+--- a/frontend/src/health/pages/CharacterPage.jsx
++++ b/frontend/src/health/pages/CharacterPage.jsx
+@@ -23,7 +23,7 @@ export default function CharacterPage(){
+  const sizeControl=(key,label)=><label className="character-range">{label}<output>{Math.round(draft[key]*100)}</output><input aria-label={label} aria-valuetext={draft[key]===0?'기본':`${draft[key]>0?'크게':'작게'} ${Math.abs(Math.round(draft[key]*100))}`} type="range" min="-1" max="1" step=".05" value={draft[key]} onChange={e=>change(key,Number(e.target.value))}/><small>작게 <span>크게</span></small><button type="button" className="character-size-reset" onClick={()=>change(key,0)}>기본 크기로</button></label>;
+  const skinPicker=<section className="character-skin" aria-label="피부 톤 선택"><h2>피부 톤</h2><p className="muted">색을 누르면 바로 미리보기에 반영됩니다.</p><div className="character-skin-grid">{SKIN_TONES.map(({color:swatch,label})=><button type="button" key={swatch} aria-label={`피부 톤 ${label}`} aria-pressed={draft.skin.toLowerCase()===swatch} onClick={()=>change('skin',swatch)}><span className="character-skin-swatch" style={{background:swatch}}/><span>{label}</span>{draft.skin.toLowerCase()===swatch&&<span className="character-skin-check" aria-hidden="true">✓</span>}</button>)}</div>{color('skin','피부색')}<p className="muted">팔레트 아래 색상 버튼으로 직접 조절할 수도 있습니다. 조명에 따라 보이는 색은 달라집니다.</p></section>;
+  return <main className="character-studio"><header><Link to="/health/profile">← 프로필</Link><p className="character-eyebrow">MY EXERCISE CHARACTER</p><h1>나만의 운동 캐릭터</h1><p>내 취향으로 꾸미고, 함께 움직여 보세요.</p></header>
+- <div className="character-workspace"><section ref={preview} className="character-preview" aria-label="캐릭터 미리보기"><ExerciseMotion3D motion={motion} progress={progress} character={draft} highlight={false} faceFocus={faceFocus}/>{faceFocus&&<div className="character-eye-quick" role="group" aria-label="확대 화면 눈동자 색"><span>눈 색</span>{EYE_COLORS.map(({color:swatch,label})=><button key={swatch} type="button" aria-label={`미리보기 눈동자 ${label}`} title={label} aria-pressed={draft.eyes.toLowerCase()===swatch} onClick={()=>change('eyes',swatch)}><span className="character-iris-swatch" style={{'--iris-color':swatch}}/></button>)}</div>}<div className="character-preview-controls"><button className="btn btn-secondary" aria-pressed={faceFocus} onClick={()=>{setFaceFocus(v=>!v);setPlaying(false);setMotion('shoulder_roll');setProgress(0);}}>{faceFocus?'전신 보기':'얼굴 확대'}</button><button className="btn btn-primary" onClick={()=>setPlaying(v=>!v)}>{playing?'동작 멈추기':'동작 미리보기'}</button><select aria-label="미리볼 운동" value={motion} onChange={e=>{setMotion(e.target.value);setProgress(0);}}><option value="squat">스쿼트</option><option value="wall_push">벽 푸시업</option><option value="shoulder_roll">어깨 돌리기</option></select></div><label className="character-range">자세 확인<input aria-label="미리보기 동작 구간" type="range" min="0" max="1000" step="1" value={Math.round(progress*1000)} onChange={e=>{setPlaying(false);setProgress(Number(e.target.value)/1000);}}/></label><p className="muted">동작 미리보기를 누르면 캐릭터와 머리카락이 함께 움직입니다. 자유 시점에서는 드래그해 돌려 볼 수 있습니다.</p></section>
++ <div className="character-workspace"><section ref={preview} className="character-preview" aria-label="캐릭터 미리보기"><ExerciseMotion3D motion={motion} progress={progress} character={draft} highlight={false} faceFocus={faceFocus} angleControls/>{faceFocus&&<div className="character-eye-quick" role="group" aria-label="확대 화면 눈동자 색"><span>눈 색</span>{EYE_COLORS.map(({color:swatch,label})=><button key={swatch} type="button" aria-label={`미리보기 눈동자 ${label}`} title={label} aria-pressed={draft.eyes.toLowerCase()===swatch} onClick={()=>change('eyes',swatch)}><span className="character-iris-swatch" style={{'--iris-color':swatch}}/></button>)}</div>}<div className="character-preview-controls"><button className="btn btn-secondary" aria-pressed={faceFocus} onClick={()=>{setFaceFocus(v=>!v);setPlaying(false);setMotion('shoulder_roll');setProgress(0);}}>{faceFocus?'전신 보기':'얼굴 확대'}</button><button className="btn btn-primary" onClick={()=>setPlaying(v=>!v)}>{playing?'동작 멈추기':'동작 미리보기'}</button><select aria-label="미리볼 운동" value={motion} onChange={e=>{setMotion(e.target.value);setProgress(0);}}><option value="squat">스쿼트</option><option value="wall_push">벽 푸시업</option><option value="shoulder_roll">어깨 돌리기</option></select></div><label className="character-range">자세 확인<input aria-label="미리보기 동작 구간" type="range" min="0" max="1000" step="1" value={Math.round(progress*1000)} onChange={e=>{setPlaying(false);setProgress(Number(e.target.value)/1000);}}/></label><p className="muted">동작 미리보기를 누르면 캐릭터와 머리카락이 함께 움직입니다. 자유 시점에서는 드래그해 돌려 볼 수 있습니다.</p></section>
+  <section className="character-panel"><div className="character-tabs" role="group" aria-label="꾸미기 항목">{TABS.map((name,i)=><button key={name} aria-pressed={tab===i} onClick={()=>setTab(i)}>{name}</button>)}</div>
+  <div className="character-fields">{tab===0&&<><h2>표현 스타일</h2>{choices('style',[['realistic','입체 운동복'],['toon','애니 · 툰']])}<p className="muted">애니 · 툰은 현재 인체에 만화풍 명암을 적용합니다. 버튜버 전용 모델·표정 추적은 아직 지원하지 않습니다.</p><button type="button" className="btn btn-secondary" onClick={()=>{setDraft(d=>({...d,body:"female",face:"refined",hairStyle:"sleek",hair:"#272323",eyeSize:0}));setFaceFocus(true);setPlaying(false);setMotion("shoulder_roll");setProgress(0);setMessage("여성 캐릭터 프리셋을 미리 봅니다. 저장하면 적용됩니다.");requestAnimationFrame(()=>preview.current?.scrollIntoView({block:"start",behavior:"instant"}));}}>여성 캐릭터 프리셋</button><h2>기본 체형</h2>{choices('body',[['male','남성형'],['female','여성형']])}{skinPicker}</>}
+  {tab===1&&<><h2>얼굴 윤곽</h2>{choices('face',[['balanced','기본'],['soft','부드러운'],['angular','갸름한'],['refined','섬세한']])}{sizeControl('eyeSize','눈 크기')}{skinPicker}<section aria-label="눈동자 색 선택"><h2>눈동자 색</h2><div className="character-eye-colors">{EYE_COLORS.map(({color:swatch,label})=><button type="button" key={swatch} aria-label={`눈동자 ${label}`} aria-pressed={draft.eyes.toLowerCase()===swatch} onClick={()=>change('eyes',swatch)}><span className="character-iris-swatch" style={{'--iris-color':swatch}}/><span>{label}</span></button>)}</div>{color('eyes','눈동자 색상')}<button className="btn btn-secondary" type="button" onClick={()=>{setFaceFocus(true);setMotion('shoulder_roll');setPlaying(false);setProgress(0);requestAnimationFrame(()=>preview.current?.scrollIntoView({block:'start',behavior:'instant'}));}}>눈 색 확대해서 보기</button><p className="muted">확대 화면에서 홍채의 색과 무늬를 확인하세요. 저장하면 운동 화면에도 적용됩니다.</p></section><h2>헤어 스타일</h2>{choices('hairStyle',[['short','숏 컷'],['parted','사이드 파트'],['wavy','내추럴 웨이브'],['layered','레이어드 단발'],['bob','클래식 단발'],['pixie','사이드 뱅 숏'],['sleek','레이어드 미디엄'],['bun','묶음 머리'],['ponytail','포니테일']])}{sizeControl('hairVolume','머리 볼륨')}<h2>헤어 컬러</h2><div className="character-swatches">{COLORS.map(c=><button key={c} aria-label={`머리색 ${c}`} aria-pressed={draft.hair===c} style={{background:c}} onClick={()=>change('hair',c)}/>)}</div>{color('hair','직접 고른 머리색')}</>}
+diff --git a/frontend/src/health/pages/ProfilePage.jsx b/frontend/src/health/pages/ProfilePage.jsx
+index 26e1335..677f91e 100644
+--- a/frontend/src/health/pages/ProfilePage.jsx
++++ b/frontend/src/health/pages/ProfilePage.jsx
+@@ -1,7 +1,8 @@
+ import {LOCAL_ONLY} from '../../shared/lib/localMode.js';
+ import {saveProfileChanges} from '../lib/saveProfileChanges.js';
+ import {registerDraftNavigation} from '../../shared/lib/draftNavigation.js';
+-import {EQUIPMENT_LABELS} from '../lib/exerciseLabels.js';
++import {GOAL_OPTIONS,LOCATION_OPTIONS,EQUIPMENT_OPTIONS,toCsv,fromCsv} from '../lib/exerciseProfileOptions.js';
++import ExperienceDetail from '../components/ExperienceDetail.jsx';
+ import { Link } from 'react-router-dom';
+ import React, { useEffect, useState, useRef } from 'react';
+ import MeasurementEntry from '../components/MeasurementEntry.jsx';
+@@ -10,28 +11,6 @@ import { HealthAPI } from '../../shared/lib/api.js';
+ import { Card, Skeleton, ErrorState, Disclaimer } from '../../shared/components/ui.jsx';
+ import { useApiData } from '../lib/useApiData.js';
+ 
+-const GOAL_OPTIONS = [
+-  { value: 'MUSCLE_GAIN', label: '근력/근육량 향상' },
+-  { value: 'FAT_MANAGEMENT', label: '체지방 관리' },
+-  { value: 'GENERAL_FITNESS', label: '전반적인 체력 향상' },
+-  { value: 'BALANCE', label: '좌우 균형 개선' },
+-  { value: 'GENERAL_HEALTH', label: '일반 건강 관리' },
+-];
+-
+-const EXPERIENCE_OPTIONS = [
+-  { value: 'BEGINNER', label: '초급' },
+-  { value: 'INTERMEDIATE', label: '중급' },
+-  { value: 'ADVANCED', label: '고급' },
+-];
+-
+-const LOCATION_OPTIONS = [
+-  { value: 'gym', label: '헬스장' },
+-  { value: 'home', label: '홈트레이닝' },
+-  { value: 'outdoor', label: '실외' },
+-];
+-
+-const EQUIPMENT_OPTIONS = Object.entries(EQUIPMENT_LABELS).filter(([value])=>value!=='none').map(([value,label])=>({value,label}));
+-
+ const SAFETY_FIELDS = [
+   { key: 'safety_chest_pain', label: '최근 심한 흉통이 있었나요?' },
+   { key: 'safety_fainting', label: '실신한 적이 있나요?' },
+@@ -40,13 +19,6 @@ const SAFETY_FIELDS = [
+   { key: 'safety_medical_restriction', label: '의료진이 운동 제한을 지시했나요?' },
+ ];
+ 
+-function toCsv(list) {
+-  return (list || []).join(', ');
+-}
+-function fromCsv(text) {
+-  return text.split(',').map((s) => s.trim()).filter(Boolean);
+-}
+-
+ export default function ProfilePage() {
+   const [dirty,setDirty]=useState(false),guard=useRef(Symbol());
+   useEffect(()=>registerDraftNavigation(guard.current,dirty,()=>Promise.resolve(),'저장하지 않은 프로필·안전 문진 변경이 있습니다. 변경을 버리고 이동할까요?','/health/profile'),[dirty]);
+@@ -100,6 +72,7 @@ export default function ProfilePage() {
+       const health=current&&(heightNum!==current.height||gender!==current.gender||(LOCAL_ONLY&&(name!==profile.data?.name||(birthDate||null)!==current.birth_date)))?{height:heightNum,gender,...(LOCAL_ONLY?{name,birth_date:birthDate||null}: {})}:null;
+       await saveProfileChanges(HealthAPI,health,{
+         experience_level: form.experience_level,
++        experience_detail: form.experience_detail || null,
+         goal: form.goal,
+         days_per_week: Number(form.days_per_week) || 1,
+         minutes_per_session: Number(form.minutes_per_session) || 10,
+@@ -164,12 +137,6 @@ export default function ProfilePage() {
+               {GOAL_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+             </select>
+           </div>
+-          <div>
+-            <label className="field-label" htmlFor="experience-select">운동 경험</label>
+-            <select id="experience-select" className="text-input" value={form.experience_level} onChange={(e) => setForm({ ...form, experience_level: e.target.value })}>
+-              {EXPERIENCE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+-            </select>
+-          </div>
+           <div>
+             <label className="field-label" htmlFor="days-input">주당 운동 일수</label>
+             <input id="days-input" type="number" min={1} max={7} className="text-input" value={form.days_per_week}
+@@ -189,6 +156,12 @@ export default function ProfilePage() {
+           </div>
+         </div>
+ 
++        <div style={{ marginTop: 14 }}>
++          {/* Select changes inside fire onChangeCapture on the wrapper, which marks the draft dirty. */}
++          <ExperienceDetail detail={form.experience_detail} savedLevel={form.experience_level}
++            onChange={(detail) => setForm({ ...form, experience_detail: detail })} />
++        </div>
++
+         <div style={{ marginTop: 14 }}>
+           <label className="field-label">실제로 이용할 수 있는 운동 기구</label><p className="muted">맨몸운동만 선택하면 기구 설정과 관계없이 맨몸으로 구성합니다. 머신은 이용할 종류를 각각 선택하세요.</p>
+           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
+diff --git a/frontend/src/health/pages/RoutinePage.jsx b/frontend/src/health/pages/RoutinePage.jsx
+index 8fb9165..11ca34c 100644
+--- a/frontend/src/health/pages/RoutinePage.jsx
++++ b/frontend/src/health/pages/RoutinePage.jsx
+@@ -1,7 +1,10 @@
+ import ExerciseReplacement from '../components/exercise/ExerciseReplacement.jsx';
+ import React, { useState } from 'react';
+ import ExerciseCard from '../components/exercise/ExerciseCard.jsx';
++import RoutineConditions from '../components/RoutineConditions.jsx';
++import { periodLabel } from '../lib/exerciseProfileOptions.js';
+ import { Link } from 'react-router-dom';
++import { ChevronDown } from 'lucide-react';
+ import { HealthAPI } from '../../shared/lib/api.js';
+ import { Card, Skeleton, ErrorState, EmptyState, Badge } from '../../shared/components/ui.jsx';
+ import { useApiData } from '../lib/useApiData.js';
+@@ -17,12 +20,66 @@ function groupByDay(exercises) {
+   return [...map.entries()].sort((a, b) => a[0] - b[0]);
+ }
+ 
++function DayCard({ latest, day, exs, onReplaced }) {
++  return (
++    <Card title={`${day}일차 · ${exs.length}개 운동`} action={latest.day_minutes?.[String(day)] != null ? <Badge>약 {latest.day_minutes[String(day)]}분</Badge> : null}>
++      {latest.day_timing?.[day]&&<div className="plan-stats" aria-label={`${day}일차 시간 구성`}><div className="plan-stat"><span>직접 준비운동</span><strong>{latest.day_timing[day].warmup_seconds}초</strong></div><div className="plan-stat"><span>실제 운동</span><strong>{Math.round(latest.day_timing[day].work_seconds/6)/10}분</strong></div><div className="plan-stat"><span>휴식·동작 전환</span><strong>{latest.day_timing[day].rest_seconds}초</strong></div></div>}
++      <p className="muted">{latest.schedule?.[day-1] || '작은 시범으로 동작을 확인하고 자세히 보기를 눌러 확대하세요.'}</p>
++      {latest.day_timing?.[day]&&<p className="muted">시작 전 가벼운 걷기·제자리걷기로 준비하세요. 예상 시간은 기본 시범 속도 기준이며, 운동 후 자동 추천 스트레칭은 별도입니다. 몸 상태에 따라 쉬는 시간을 늘리거나 중단할 수 있습니다.</p>}
++      {!latest.needs_review&&<Link className="btn btn-primary" to={`/health/workout?mode=tempo&day=${day}&routine=${encodeURIComponent(latest.id)}`}>{day}일차 루틴 시작</Link>}
++      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
++        {exs.map((ex,i)=><ExerciseCard key={`${latest.id}-${ex.exercise_id||i}`} exercise={ex}><ExerciseReplacement routine={latest} exercise={ex} onReplaced={onReplaced}/></ExerciseCard>)}
++      </div>
++    </Card>
++  );
++}
++
++function PeriodGroup({ title, badge, defaultOpen, children }) {
++  const [open, setOpen] = useState(defaultOpen);
++  return (
++    <section className="period-group">
++      <button type="button" className="period-group-head" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
++        <strong>{title}</strong>{badge && <Badge>{badge}</Badge>}<ChevronDown size={18} className="period-group-chevron" />
++      </button>
++      {/* Closed groups render nothing, so long plans do not mount every exercise preview. */}
++      {open && <div className="period-group-body">{children}</div>}
++    </section>
++  );
++}
++
++// The routine is one weekly template; it repeats for every week of the chosen period.
++function RoutinePeriods({ routine, days, renderDay }) {
++  if (routine.period_unit === 'day') return days.map(([day, exs]) => renderDay(day, exs));
++  const months = routine.period_unit === 'month' ? routine.period_length : null;
++  const totalWeeks = months ? months * 4 : routine.period_length || routine.duration_weeks || 1;
++  const elapsed = Math.floor((Date.now() - Date.parse(routine.created_at)) / (7 * 86400000));
++  const current = Number.isFinite(elapsed) ? Math.min(Math.max(elapsed, 0), totalWeeks - 1) + 1 : 1;
++  const week = (w) => (
++    <PeriodGroup key={w} title={`${w}주차`} badge={w === current ? '이번 주' : null} defaultOpen={w === current}>
++      {days.map(([day, exs]) => renderDay(day, exs))}
++    </PeriodGroup>
++  );
++  const range = (from, to) => Array.from({ length: to - from + 1 }, (_, i) => from + i);
++  if (!months) return range(1, totalWeeks).map(week);
++  return range(1, months).map((m) => {
++    const weeks = range((m - 1) * 4 + 1, m * 4);
++    return (
++      <PeriodGroup key={`m${m}`} title={`${m}개월차`} badge={weeks.includes(current) ? '진행 중' : null} defaultOpen={weeks.includes(current)}>
++        {weeks.map(week)}
++      </PeriodGroup>
++    );
++  });
++}
++
+ export default function RoutinePage() {
+   const history = useApiData(() => HealthAPI.adaptiveHistory(), []);
+   const routines = useApiData(() => HealthAPI.listRoutines(), []);
+   const [generating, setGenerating] = useState(false);
+   const [genError, setGenError] = useState(null);
+   const [safetyBlocked, setSafetyBlocked] = useState(false);
++  // Every generation first re-checks the profile's goal/environment and per-region purposes.
++  const [checking, setChecking] = useState(false);
++  const openCheck = () => { setGenError(null); setSafetyBlocked(false); setChecking(true); };
+ 
+   async function generate() {
+     setGenerating(true);
+@@ -30,14 +87,17 @@ export default function RoutinePage() {
+     setSafetyBlocked(false);
+     try {
+       await HealthAPI.generateRoutine();
++      setChecking(false);
+       await routines.reload();
+       await history.reload();
+     } catch (error) {
+       if (error.status === 409 || error.message === SAFETY_MESSAGE) {
+         setSafetyBlocked(true);
+         setGenError(error);
++        setChecking(false);
+       } else {
+         setGenError(error);
++        if (error.status === 422) setChecking(false);
+       }
+     } finally {
+       setGenerating(false);
+@@ -53,6 +113,7 @@ export default function RoutinePage() {
+   return (
+     <>
+       <Link className="btn btn-secondary" to="/health/library">맨몸·헬스장 운동 찾아보기</Link>
++      {checking && <RoutineConditions onConfirm={generate} onCancel={() => setChecking(false)} busy={generating} />}
+       {safetyBlocked && (
+         <Card>
+           <div className="error-state">
+@@ -74,14 +135,14 @@ export default function RoutinePage() {
+         </Card>
+       )}
+ 
+-      {genError && !safetyBlocked && genError.status !== 422 && <ErrorState message={genError.message} onRetry={generate} />}
++      {genError && !safetyBlocked && genError.status !== 422 && <ErrorState message={genError.message} onRetry={openCheck} />}
+ 
+-      {!latest && !safetyBlocked && !genError && (
++      {!latest && !safetyBlocked && !genError && !checking && (
+         <Card>
+           <EmptyState
+             title="아직 생성된 루틴이 없어요"
+             description="최신 체성분·운동환경·수행 피드백에 맞춰 동작 안내가 있는 루틴을 만듭니다."
+-            action={<button className="btn btn-primary" onClick={generate} disabled={generating}>{generating ? '생성 중...' : '내 운동 계획 만들기'}</button>}
++            action={<button className="btn btn-primary" onClick={openCheck}>내 운동 계획 만들기</button>}
+           />
+         </Card>
+       )}
+@@ -89,7 +150,7 @@ export default function RoutinePage() {
+       {latest && !safetyBlocked && (
+         <Card
+           title={latest.goal || '맞춤 운동 루틴'}
+-          action={<button className="btn btn-secondary" onClick={generate} disabled={generating}>{generating ? '생성 중...' : '루틴 재생성'}</button>}
++          action={<button className="btn btn-secondary" onClick={openCheck}>루틴 재생성</button>}
+         >
+           {latest.needs_review && <p role="alert" className="motion-cautions">{latest.review_reason}</p>}
+           <p className="muted">{latest.summary}</p>
+@@ -106,24 +167,15 @@ export default function RoutinePage() {
+           </details>
+           <p className="muted" style={{fontSize:'.76rem',marginTop:12}}>검토 가능한 규칙 기반 맞춤 추천 · 새 측정값을 등록하면 기존 루틴을 자동 재검토합니다.</p>
+           <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+-            <Badge>{latest.duration_weeks}주 프로그램</Badge>
+-            <Badge tone="blue">주 {latest.days_per_week}회</Badge>
++            <Badge>{periodLabel(latest)}</Badge>
++            {latest.period_unit !== 'day' && <Badge tone="blue">주 {latest.days_per_week}회</Badge>}
+           </div>
+         </Card>
+       )}
+ 
+ 
+-      {!safetyBlocked && days.map(([day, exs]) => (
+-        <Card key={day} title={`${day}일차 · ${exs.length}개 운동`} action={latest.day_minutes?.[String(day)] != null ? <Badge>약 {latest.day_minutes[String(day)]}분</Badge> : null}>
+-          {latest.day_timing?.[day]&&<div className="plan-stats" aria-label={`${day}일차 시간 구성`}><div className="plan-stat"><span>직접 준비운동</span><strong>{latest.day_timing[day].warmup_seconds}초</strong></div><div className="plan-stat"><span>실제 운동</span><strong>{Math.round(latest.day_timing[day].work_seconds/6)/10}분</strong></div><div className="plan-stat"><span>휴식·동작 전환</span><strong>{latest.day_timing[day].rest_seconds}초</strong></div></div>}
+-          <p className="muted">{latest.schedule?.[day-1] || '작은 시범으로 동작을 확인하고 자세히 보기를 눌러 확대하세요.'}</p>
+-          {latest.day_timing?.[day]&&<p className="muted">시작 전 가벼운 걷기·제자리걷기로 준비하세요. 예상 시간은 기본 시범 속도 기준이며, 운동 후 자동 추천 스트레칭은 별도입니다. 몸 상태에 따라 쉬는 시간을 늘리거나 중단할 수 있습니다.</p>}
+-          {!latest.needs_review&&<Link className="btn btn-primary" to={`/health/workout?mode=tempo&day=${day}&routine=${encodeURIComponent(latest.id)}`}>{day}일차 루틴 시작</Link>}
+-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+-            {exs.map((ex,i)=><ExerciseCard key={`${latest.id}-${ex.exercise_id||i}`} exercise={ex}><ExerciseReplacement routine={latest} exercise={ex} onReplaced={()=>Promise.all([routines.reload(),history.reload()])}/></ExerciseCard>)}
+-          </div>
+-        </Card>
+-      ))}
++      {!safetyBlocked && latest && <RoutinePeriods routine={latest} days={days}
++        renderDay={(day, exs) => <DayCard key={day} latest={latest} day={day} exs={exs} onReplaced={() => Promise.all([routines.reload(), history.reload()])} />} />}
+       <Card title="운동 계획 변경 이력">{history.error?<ErrorState message={history.error.message} onRetry={history.reload}/>:history.loading?<Skeleton/>:!(history.data||[]).length?<p className="muted">루틴을 생성하면 변경 이유가 여기에 기록됩니다.</p>:(history.data||[]).map(h=><details key={h.id}><summary>{h.date.slice(0,10)} · {h.new_routine.goal}</summary><p>{h.reason}</p><p>이전: {h.old_routine?.goal||'첫 계획'} → 현재: {h.new_routine.goal}</p><p>기록된 완료 비율: {h.workout_adherence==null?'자료 없음':`${Math.round(h.workout_adherence*100)}%`}</p></details>)}</Card>
+     </>
+   );
+diff --git a/frontend/src/shared/lib/localApi.js b/frontend/src/shared/lib/localApi.js
+index c7ac97a..f0e60a7 100644
+--- a/frontend/src/shared/lib/localApi.js
++++ b/frontend/src/shared/lib/localApi.js
+@@ -1,12 +1,15 @@
+-import {balancedLocalDays,LOCAL_ROUTINE_VERSION} from './localRoutinePlan.js';
++import {balancedLocalDays,LOCAL_ROUTINE_VERSION,REGION_FOCUS_LABELS} from './localRoutinePlan.js';
+ import catalog from './localCatalog.json';
+ import schools from './localSchools.json';
+ import {loadLocalDocument,saveLocalDocument} from './offline.js';
+ import {secureUUID} from './uuid.js';
+ import {LOCAL_ACCOUNT} from './localMode.js';
+ import {ageAt} from '../../health/lib/publishedMuscleReference.js';
++import {deriveExperienceLevel,validExperienceDetail} from '../../health/lib/exerciseProfileOptions.js';
+ const segments=['LEFT_ARM','RIGHT_ARM','TRUNK','LEFT_LEG','RIGHT_LEG'];
+ const safety=['safety_chest_pain','safety_fainting','safety_breathlessness','safety_acute_injury','safety_medical_restriction'];
++const validFocus=v=>v==null||(Array.isArray(v)&&new Set(v).size===v.length&&v.every(k=>k in REGION_FOCUS_LABELS));
++const validPlan=x=>(x.plan_unit==null||['day','week','month'].includes(x.plan_unit))&&(x.plan_length==null||(Number.isInteger(x.plan_length)&&x.plan_length>=1&&x.plan_length<=12));
+ const now=()=>new Date().toISOString();
+ export const localDate=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
+ const fail=(message,status=422)=>{throw Object.assign(Error(message),{status});};
+@@ -46,8 +49,13 @@ export function generateLocalRoutine(s){
+  const gentle=p.experience_level==='BEGINNER'||(bmi!=null&&bmi<18.5)||muscleDown||recent.some(w=>(w.rpe??0)>=8);
+  const cautious=(bmi!=null&&bmi<18.5)||muscleDown||recent.some(w=>(w.rpe??0)>=8);
+  const fatGoal=p.goal==='FAT_MANAGEMENT'||['fat_loss','weight_loss'].includes(s.goal?.strategy);
+- const {exercises,day_minutes,day_timing,schedule}=balancedLocalDays(p,{gentle,cautious,fatGoal});
+- return {id:secureUUID(),user_id:LOCAL_ACCOUNT,created_at:now(),based_on_measurement_id:m.id,goal:({GENERAL_HEALTH:'기본 체력 관리',GENERAL_FITNESS:'전반적인 체력 향상',MUSCLE_GAIN:'근력·근육량 향상',FAT_MANAGEMENT:'체지방 관리',BALANCE:'균형 있는 움직임'})[p.goal]||'나의 운동 계획',summary:'이 폰에서 생성한 기본 운동 계획입니다. 여러 근력 동작을 먼저 배정하고 남는 시간에 유산소를 더합니다. 준비운동·실제 시범·휴식을 합산한 시간이며, 근력 세션 사이에는 회복일을 두세요.',duration_weeks:4,days_per_week:p.days_per_week,exercises,day_minutes,day_timing,generated_by:'local_rules',algorithm_version:LOCAL_ROUTINE_VERSION,needs_review:false,rationale:[`운동 경험: ${{BEGINNER:'처음 시작',INTERMEDIATE:'꾸준히 운동 중',ADVANCED:'운동 경험이 많음'}[p.experience_level]} · ${{home:'집',gym:'헬스장',outdoor:'실외'}[p.exercise_location]}`,`측정 체중 ${m.weight}kg · 골격근량 ${m.skeletal_muscle_mass}kg`,muscleDown?'이전보다 낮은 골격근량 기록이 있어 부담을 낮췄습니다. 측정 차이만으로 근력 저하를 진단하지 않습니다.':'근육량만으로 실제 근력·적정 중량을 추정하지 않습니다.'],notices:['개인용 기본 규칙이며 서버의 전체 추천 알고리즘과 다릅니다.','부위별 측정값과 실제 인구 평균은 만들거나 추정하지 않습니다.','통증·어지럼·흉통이 있으면 즉시 중단하세요.'],sources:[{title:'Fitbod · 목표·장비·회복을 고려한 운동 구성',url:'https://fitbod.me/'},{title:'Strong · 사용자 조절 타이머와 운동 기록',url:'https://www.strong.app/'},{title:'Nike Training Club · 단계별 프로그램',url:'https://www.nike.com/ntc-app'}],input_snapshot:{weight_kg:m.weight,muscle_kg:m.skeletal_muscle_mass,body_fat_percent:m.body_fat_percentage,profile:structuredClone(p)},schedule,progression:gentle?'적은 세트부터 시작하고 통증과 수행 부담을 기록하세요.':'실제 수행 기록을 확인한 뒤 재생성하세요. 중량은 자동으로 올리지 않습니다.'};
++ const unit=p.plan_unit||'week',length=unit==='day'?1:p.plan_length||4,daysPerWeek=unit==='day'?1:p.days_per_week;
++ const period=unit==='day'?'하루':unit==='week'?`${length}주`:`${length}개월`,weeks=unit==='day'?0:length*(unit==='month'?4:1);
++ const plan=balancedLocalDays({...p,days_per_week:daysPerWeek},{gentle,cautious,fatGoal}),{exercises,day_minutes,day_timing}=plan;
++ const schedule=unit==='day'?['오늘 · 전신 근력']:plan.schedule;
++ const focused=Object.keys(REGION_FOCUS_LABELS).filter(k=>p.focus_regions?.includes(k)).map(k=>REGION_FOCUS_LABELS[k]);
++ const goalLabel=(({GENERAL_HEALTH:'기본 체력 관리',GENERAL_FITNESS:'전반적인 체력 향상',MUSCLE_GAIN:'근력·근육량 향상',FAT_MANAGEMENT:'체지방 관리',BALANCE:'균형 있는 움직임'})[p.goal]||'나의 운동 계획')+(focused.length?` · ${focused.join(', ')} 집중`:'');
++ return {id:secureUUID(),user_id:LOCAL_ACCOUNT,created_at:now(),based_on_measurement_id:m.id,goal:goalLabel,summary:`이 폰에서 생성한 ${period} 기본 운동 계획입니다.`+' 여러 근력 동작을 먼저 배정하고 남는 시간에 유산소를 더합니다. 준비운동·실제 시범·휴식을 합산한 시간이며, 근력 세션 사이에는 회복일을 두세요.',duration_weeks:weeks,days_per_week:daysPerWeek,period_unit:unit,period_length:length,exercises,day_minutes,day_timing,generated_by:'local_rules',algorithm_version:LOCAL_ROUTINE_VERSION,needs_review:false,rationale:[`운동 경험: ${{BEGINNER:'처음 시작',INTERMEDIATE:'꾸준히 운동 중',ADVANCED:'운동 경험이 많음'}[p.experience_level]} · ${{home:'집',gym:'헬스장',outdoor:'실외'}[p.exercise_location]}`,`측정 체중 ${m.weight}kg · 골격근량 ${m.skeletal_muscle_mass}kg`,muscleDown?'이전보다 낮은 골격근량 기록이 있어 부담을 낮췄습니다. 측정 차이만으로 근력 저하를 진단하지 않습니다.':'근육량만으로 실제 근력·적정 중량을 추정하지 않습니다.',...(focused.length?[`집중 부위: ${focused.join(', ')}. 먼저 배치하고 시간 안에서 1세트를 더합니다.${cautious?' 최근 부담·근육량 변화로 이번에는 세트를 더하지 않았습니다.':''}`]:[]),...(deriveExperienceLevel(p.experience_detail)?['운동 경험 단계는 프로필의 운동 기간·주당 횟수 응답으로 정했습니다. 체력 측정 결과가 아닌 자기 보고입니다.']:[])],notices:[...(weeks>4?[`${period} 계획이라도 같은 구성을 계속 고정하지 않습니다. 4주마다 재측정하거나 기록을 남긴 뒤 다시 생성하세요.`]:[]),...(unit==='day'?['하루 루틴은 한 번 수행하는 구성입니다. 꾸준히 하려면 주 또는 개월 단위로 계획을 만드세요.']:[]),'개인용 기본 규칙이며 서버의 전체 추천 알고리즘과 다릅니다.','부위별 측정값과 실제 인구 평균은 만들거나 추정하지 않습니다.','통증·어지럼·흉통이 있으면 즉시 중단하세요.'],sources:[{title:'Fitbod · 목표·장비·회복을 고려한 운동 구성',url:'https://fitbod.me/'},{title:'Strong · 사용자 조절 타이머와 운동 기록',url:'https://www.strong.app/'},{title:'Nike Training Club · 단계별 프로그램',url:'https://www.nike.com/ntc-app'}],input_snapshot:{weight_kg:m.weight,muscle_kg:m.skeletal_muscle_mass,body_fat_percent:m.body_fat_percentage,profile:structuredClone(p)},schedule,progression:gentle?'적은 세트부터 시작하고 통증과 수행 부담을 기록하세요.':'실제 수행 기록을 확인한 뒤 재생성하세요. 중량은 자동으로 올리지 않습니다.'};
+ }
+ let chain=Promise.resolve();
+ function restoredDocument(backup){
+@@ -64,6 +72,7 @@ function restoredDocument(backup){
+   numeric(d.exercise.days_per_week,1,7,'운동 일수');numeric(d.exercise.minutes_per_session,10,180,'운동 시간');
+   for(const k of ['limitations','preferences','available_equipment'])if(!Array.isArray(d.exercise[k])||d.exercise[k].some(x=>typeof x!=='string'))fail('운동 조건이 잘못되었습니다.');
+   for(const k of safety)if(typeof d.exercise[k]!=='boolean')fail('안전 문진이 잘못되었습니다.');
++  if(!validFocus(d.exercise.focus_regions)||!validPlan(d.exercise)||!validExperienceDetail(d.exercise.experience_detail))fail('운동 조건이 잘못되었습니다.');
+   for(const item of d.measurements){validateMeasurement(item);if(typeof item.id!=='string'||!Number.isFinite(Date.parse(item.created_at)))fail('측정 식별자가 잘못되었습니다.');}
+   d.workouts.forEach(item=>{validateWorkout(item);if(typeof item.id!=='string'||!Number.isFinite(Date.parse(item.created_at)))fail('운동 식별자가 잘못되었습니다.');});
+   // Derived plans are regenerated from validated measurements and conditions.
+@@ -79,7 +88,7 @@ export function localApi(path,b,{method,signal}={}){
+  const save=x=>{result=x;write=true;};
+  if(p==='/api/health/status')result={status:'ok',service:'synex-health',demo:false,local:true};
+  else if(p==='/api/health/profile'){if(m==='PUT'){if(b.height!=null)numeric(b.height,50,250,'키');if(b.gender&&!['male','female','unspecified'].includes(b.gender))fail('성별 값이 잘못되었습니다.');if(b.name!=null&&(typeof b.name!=='string'||b.name.length>30))fail('이름은 30자 이내로 입력하세요.');if(b.birth_date!=null&&(b.birth_date<'1900-01-01'||ageAt(b.birth_date,localDate())==null))fail('올바른 오늘 이전 생년월일을 입력하세요.');if(b.birth_date!=null&&ageAt(b.birth_date,localDate())<14)fail('만 14세 이상만 사용할 수 있습니다.');s.profile={...s.profile,...(Object.hasOwn(b,'birth_date')?{birth_date:b.birth_date}:{}),...(b.name!=null?{name:b.name.trim()}:{}),height:Object.hasOwn(b,'height')?b.height:s.profile.height,gender:b.gender||s.profile.gender};review(s);save(s.profile);}else result=s.profile;}
+- else if(p==='/api/exercise-profile'){if(m==='PUT'){const next={...s.exercise,...b};numeric(next.days_per_week,1,7,'운동 일수');if(!Number.isInteger(next.days_per_week))fail('운동 일수는 정수입니다.');numeric(next.minutes_per_session,10,180,'운동 시간');if(!['BEGINNER','INTERMEDIATE','ADVANCED'].includes(next.experience_level)||!['mixed','bodyweight','equipment'].includes(next.training_mode)||!['home','gym','outdoor'].includes(next.exercise_location))fail('운동 설정이 잘못되었습니다.');for(const k of ['available_equipment','limitations','preferences'])if(!Array.isArray(next[k])||next[k].some(x=>typeof x!=='string'))fail('운동 조건을 확인하세요.');for(const k of safety)if(typeof next[k]!=='boolean')fail('안전 문진 값을 확인하세요.');s.exercise=next;review(s);save(next);}else result=s.exercise;}
++ else if(p==='/api/exercise-profile'){if(m==='PUT'){const next={...s.exercise,...b};numeric(next.days_per_week,1,7,'운동 일수');if(!Number.isInteger(next.days_per_week))fail('운동 일수는 정수입니다.');numeric(next.minutes_per_session,10,180,'운동 시간');if(!['BEGINNER','INTERMEDIATE','ADVANCED'].includes(next.experience_level)||!['mixed','bodyweight','equipment'].includes(next.training_mode)||!['home','gym','outdoor'].includes(next.exercise_location))fail('운동 설정이 잘못되었습니다.');for(const k of ['available_equipment','limitations','preferences'])if(!Array.isArray(next[k])||next[k].some(x=>typeof x!=='string'))fail('운동 조건을 확인하세요.');for(const k of safety)if(typeof next[k]!=='boolean')fail('안전 문진 값을 확인하세요.');if(!validFocus(next.focus_regions))fail('집중 부위를 확인하세요.');if(!validPlan(next))fail('루틴 기간은 1–12 사이로 입력하세요.');if(next.plan_unit==='day')next.plan_length=1;if(!validExperienceDetail(next.experience_detail))fail('운동 경험 항목을 확인하세요.');next.experience_level=deriveExperienceLevel(next.experience_detail)||next.experience_level;s.exercise=next;review(s);save(next);}else result=s.exercise;}
+  else if(p==='/api/schools')result=schools;
+  else if(p==='/api/health/school-connection')result={verified:false,integration_status:'기기 전용 · 미연결'};
+  else if(p==='/api/health/school'&&m==='PUT'){if(b.share_with_center)fail('기기 전용 모드에서는 건강센터 공유를 사용할 수 없습니다.');if(b.school_id&&!schools.some(x=>x.id===b.school_id))fail('학교를 확인하세요.');s.profile.school_id=b.school_id;s.profile.share_with_center=false;save(s.profile);}
+diff --git a/frontend/src/shared/lib/localRoutinePlan.js b/frontend/src/shared/lib/localRoutinePlan.js
+index 4d1b36b..b774173 100644
+--- a/frontend/src/shared/lib/localRoutinePlan.js
++++ b/frontend/src/shared/lib/localRoutinePlan.js
+@@ -3,11 +3,13 @@ import {buildTempoPlan,recommendedRest} from '../../health/components/exercise/t
+ 
+ export const LOCAL_ROUTINE_VERSION='device-balanced-v2';
+ const patterns=['squat','push','pull','hinge','core'];
++export const REGION_FOCUS_LABELS={squat:'하체 앞쪽(허벅지)',hinge:'엉덩이·허벅지 뒤',push:'가슴·어깨',pull:'등',core:'복부·코어'};
+ const preferred=['sit_stand','wall_push','scapular','bridge','dead_bug','walk'];
+ const weekdays={1:[1],2:[1,4],3:[1,3,5],4:[1,2,4,6],5:[1,2,3,5,6],6:[1,2,3,4,5,6],7:[1,2,3,4,5,6,7]};
+ const strengthSlots={1:[0],2:[0,1],3:[0,1,2],4:[0,2,3],5:[0,2,4],6:[0,2,4],7:[0,2,4]};
+ const seconds=exercises=>Math.ceil(buildTempoPlan(exercises).reduce((sum,s)=>sum+s.durationMs,0)/1000);
+ export function balancedLocalDays(profile,{gentle=false,cautious=false,fatGoal=false}={}){
++ const focus=new Set(profile.focus_regions||[]),ordered=[...patterns.filter(x=>focus.has(x)),...patterns.filter(x=>!focus.has(x))];
+  const allowed=catalog.filter(x=>x.auto_recommend!==false&&x.difficulty!=='advanced'&&x.locations.includes(profile.exercise_location)&&x.equipment.every(k=>profile.available_equipment.includes(k))&&(profile.training_mode!=='bodyweight'||!x.equipment.length));
+  const pick=(pattern,variation=0)=>{
+   let candidates=allowed.filter(x=>x.pattern===pattern);
+@@ -26,13 +28,19 @@ export function balancedLocalDays(profile,{gentle=false,cautious=false,fatGoal=f
+   const warmup=budget<=600?60:120,limit=budget-warmup;
+   let moves;
+   if(strength){
+-   moves=patterns.map(pattern=>pick(pattern,variation)).filter(Boolean).map(x=>exercise(x,day));
++   const picked=ordered.map(pattern=>[pattern,pick(pattern,variation)]).filter(([,x])=>x),focused=picked.map(([pattern])=>focus.has(pattern));
++   moves=picked.map(([pattern,x])=>{const move=exercise(x,day),label=REGION_FOCUS_LABELS[pattern];
++    if(focus.has(pattern))move.reason+=` ${label}을(를) 집중 부위로 선택해 먼저 배치했습니다.`;
++    return move;});
+    if(moves.length<4)throw Error('현재 장소·장비로 균형 잡힌 루틴을 만들 수 없습니다. 운동 조건을 확인하세요.');
+    // All movement patterns get a first set before any exercise gets extra volume.
+    const maxSets=cautious?1:profile.experience_level==='BEGINNER'?2:profile.experience_level==='ADVANCED'?4:3;
+    if(seconds(moves)>limit){moves=moves.map(x=>({...x,reps:'4',hold_seconds:15}));}
+    if(seconds(moves)>limit)throw Error('선택한 시간 안에 기본 동작과 휴식을 담을 수 없습니다. 운동 시간을 늘려 주세요.');
+-   for(let round=2;round<=maxSets;round++)for(let i=0;i<moves.length;i++){
++   // Focused patterns get one extra round unless recent strain holds volume.
++   const setCap=i=>focused[i]&&!cautious?maxSets+1:maxSets;
++   for(let round=2;round<=maxSets+1;round++)for(let i=0;i<moves.length;i++){
++    if(round>setCap(i))continue;
+     const candidate=moves.map((x,j)=>j===i?{...x,sets:round}:x);
+     if(seconds(candidate)<=limit)moves=candidate;
+    }
+diff --git a/frontend/src/shared/styles.css b/frontend/src/shared/styles.css
+index 869fc0e..6f9f08f 100644
+--- a/frontend/src/shared/styles.css
++++ b/frontend/src/shared/styles.css
+@@ -114,6 +114,23 @@ small{font-size:.8125rem}
+   font-size:.8rem;color:var(--muted);cursor:pointer}
+ .chip-checkbox.checked{background:var(--blue-pale);color:var(--blue-dark);border-color:#b8cef9;font-weight:700}
+ .chip-checkbox input{margin:0;accent-color:var(--blue)}
++.experience-detail-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
++.experience-level{font-size:.8rem;padding:4px 10px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
++.experience-level.set{background:var(--blue);border-color:var(--blue);color:var(--white);font-weight:700}
++.plan-period{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:6px}
++.plan-period-units{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden}
++.plan-period-units button{min-height:44px;min-width:64px;padding:0 14px;font-size:.875rem;color:var(--muted)}
++.plan-period-units button+button{border-left:1px solid var(--line)}
++.plan-period-units button.active{background:var(--blue);color:var(--white);font-weight:700}
++.plan-period-length{display:inline-flex;align-items:center;gap:8px;font-size:.875rem}
++.plan-period-length .text-input{width:80px}
++.period-group{border:1px solid var(--line);border-radius:var(--radius);background:var(--white);margin-bottom:12px}
++.period-group-head{display:flex;align-items:center;gap:8px;width:100%;min-height:52px;padding:10px 16px;text-align:left;color:var(--ink)}
++.period-group-head strong{flex:1}
++.period-group-chevron{transition:transform .15s;color:var(--muted)}
++.period-group-head[aria-expanded=true] .period-group-chevron{transform:rotate(180deg)}
++.period-group-body{padding:0 12px 12px}
++.period-group-body .period-group{margin-bottom:8px}
+ 
+ /* Guided movement and explainable workout planning */
+ .exercise-card { padding: 18px; border: 1px solid var(--line); border-radius: 16px; background: #fff; }
+diff --git a/frontend/tests/ExperienceLevel.test.js b/frontend/tests/ExperienceLevel.test.js
+new file mode 100644
+index 0000000..4955580
+--- /dev/null
++++ b/frontend/tests/ExperienceLevel.test.js
+@@ -0,0 +1,19 @@
++import {describe,it,expect} from 'vitest';
++import {deriveExperienceLevel,validExperienceDetail} from '../src/health/lib/exerciseProfileOptions.js';
++// Same cases as backend test_experience_level_derived_from_detail.
++describe('experience level from detailed indicators',()=>{
++ const level=(training_history,weekly_sessions)=>deriveExperienceLevel({training_history,weekly_sessions});
++ it('matches the backend rules',()=>{
++  expect(level('gt2y','3_4')).toBe('ADVANCED');
++  expect(level('6m_2y','3_4')).toBe('INTERMEDIATE');
++  expect(level('lt6m','0')).toBe('BEGINNER');
++  expect(level('none','5plus')).toBe('BEGINNER');
++  expect(level('lt6m','5plus')).toBe('INTERMEDIATE');
++  expect(deriveExperienceLevel({weekly_sessions:'0'})).toBeNull();
++ });
++ it('rejects removed or unknown answers',()=>{
++  expect(validExperienceDetail({pushups:'lt5'})).toBe(false);
++  expect(validExperienceDetail({weekly_sessions:'9'})).toBe(false);
++  expect(validExperienceDetail(null)).toBe(true);
++ });
++});
+diff --git a/frontend/tests/LocalApi.test.js b/frontend/tests/LocalApi.test.js
+index cb3b378..9b57b49 100644
+--- a/frontend/tests/LocalApi.test.js
++++ b/frontend/tests/LocalApi.test.js
+@@ -66,3 +66,17 @@ it('requires regenerating legacy routines without losing health or workout recor
+  expect(next).toMatchObject({algorithm_version:'device-balanced-v2',needs_review:false});
+  expect((await localApi('/api/body-composition/latest')).weight).toBe(60);
+ });
++it('builds one-day and multi-month plans and derives experience from the profile answers',async()=>{
++ await localApi('/api/body-composition',measurement);
++ const saved=await localApi('/api/exercise-profile',{experience_detail:{training_history:'gt2y',weekly_sessions:'5plus'},plan_unit:'day',plan_length:6,days_per_week:4},{method:'PUT'});
++ expect(saved.experience_level).toBe('ADVANCED');expect(saved.plan_length).toBe(1);
++ const day=await localApi('/api/exercise-routines/generate',{});
++ expect([day.period_unit,day.days_per_week,day.duration_weeks]).toEqual(['day',1,0]);
++ expect(new Set(day.exercises.map(e=>e.day_number))).toEqual(new Set([1]));
++ await localApi('/api/exercise-profile',{plan_unit:'month',plan_length:3},{method:'PUT'});
++ const months=await localApi('/api/exercise-routines/generate',{});
++ expect([months.period_unit,months.period_length,months.duration_weeks]).toEqual(['month',3,12]);
++ expect(months.notices.some(n=>n.includes('4주마다'))).toBe(true);
++ await expect(localApi('/api/exercise-profile',{plan_length:13},{method:'PUT'})).rejects.toThrow('루틴 기간');
++ await expect(localApi('/api/exercise-profile',{experience_detail:{pushups:'lt5'}},{method:'PUT'})).rejects.toThrow('운동 경험');
++});
+diff --git a/frontend/tests/LocalRoutinePlan.test.js b/frontend/tests/LocalRoutinePlan.test.js
+index 0ac09ea..04581e1 100644
+--- a/frontend/tests/LocalRoutinePlan.test.js
++++ b/frontend/tests/LocalRoutinePlan.test.js
+@@ -35,4 +35,15 @@ describe('balanced device routines',()=>{
+   expect(tempoPrescription({motion_id:'walk',duration:'10분'}).sets).toBe(1);
+   expect(buildTempoPlan([{motion_id:'walk',duration:'10분'}]).reduce((s,x)=>s+x.durationMs,0)).toBe(605000);
+  });
++ it('orders focused regions first and gives them one more set',()=>{
++  const profile={...base,experience_level:'INTERMEDIATE',minutes_per_session:60,focus_regions:['hinge']};
++  const pattern=e=>catalog.find(c=>c.id===e.motion_id).pattern;
++  const day=balancedLocalDays(profile).exercises.filter(e=>e.day_number===1&&pattern(e)!=='cardio');
++  expect(pattern(day[0])).toBe('hinge');
++  const sets=Object.fromEntries(day.map(e=>[pattern(e),e.sets]));
++  expect(sets.hinge).toBe(4);expect(sets.squat).toBe(3);expect(sets.push).toBe(3);
++  expect(day[0].reason).toContain('집중 부위');
++  const held=balancedLocalDays(profile,{cautious:true}).exercises.filter(e=>e.day_number===1&&pattern(e)!=='cardio');
++  expect(Math.max(...held.map(e=>e.sets))).toBe(1);
++ });
+ });
+diff --git a/frontend/tests/RoutinePage.test.jsx b/frontend/tests/RoutinePage.test.jsx
+index 91ef517..56a78dd 100644
+--- a/frontend/tests/RoutinePage.test.jsx
++++ b/frontend/tests/RoutinePage.test.jsx
+@@ -1,6 +1,6 @@
+ import React from 'react';
+ import { describe, it, expect, beforeEach } from 'vitest';
+-import { render, screen } from '@testing-library/react';
++import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+ import { MemoryRouter } from 'react-router-dom';
+ import { mockFetch } from './helpers.js';
+ import RoutinePage from '../src/health/pages/RoutinePage.jsx';
+@@ -37,4 +37,68 @@ describe('RoutinePage', () => {
+     expect(await screen.findByText('아직 생성된 루틴이 없어요')).toBeTruthy();
+     expect(screen.getByText('내 운동 계획 만들기')).toBeTruthy();
+   });
++
++  it('re-checks conditions and saves period and focus regions before generating', async () => {
++    const calls = [];
++    let profile = { goal: 'GENERAL_HEALTH', experience_level: 'INTERMEDIATE', days_per_week: 3, minutes_per_session: 30,
++      training_mode: 'mixed', exercise_location: 'home', available_equipment: [], limitations: [], preferences: [], focus_regions: [],
++      plan_unit: 'week', plan_length: 4 };
++    mockFetch({
++      '/api/exercise-profile': ({ options }) => {
++        if (options.method === 'PUT') { const body = JSON.parse(options.body); calls.push(['PUT', body]); profile = { ...profile, ...body }; }
++        return profile;
++      },
++      '/api/exercise-routines/generate': () => { calls.push(['GENERATE']); return routine; },
++      '/api/exercise-routines': [],
++      '/api/adaptive': [],
++    });
++    render(<MemoryRouter><RoutinePage /></MemoryRouter>);
++
++    fireEvent.click(await screen.findByText('내 운동 계획 만들기'));
++    expect(await screen.findByText('루틴 생성 전 운동 조건 확인')).toBeTruthy();
++    expect(screen.getByLabelText('운동 목적').value).toBe('GENERAL_HEALTH');
++    // Experience is shown but edited only on the profile screen.
++    expect(screen.getByText('중급')).toBeTruthy();
++    expect(screen.queryByLabelText('규칙적으로 운동한 기간')).toBeNull();
++    expect(calls).toEqual([]);
++
++    fireEvent.click(screen.getByRole('radio', { name: '하루' }));
++    expect(screen.queryByLabelText('루틴 기간 길이')).toBeNull();
++    expect(screen.queryByLabelText('주당 운동 일수')).toBeNull();
++    fireEvent.click(screen.getByRole('radio', { name: '개월' }));
++    fireEvent.change(screen.getByLabelText('루틴 기간 길이'), { target: { value: '3' } });
++
++    const focus = (label) => screen.getByText(label, { selector: 'label' }).querySelector('input');
++    for (const label of ['하체 앞쪽', '등', '복부·코어']) fireEvent.click(focus(label));
++
++    fireEvent.click(screen.getByText('이 조건으로 루틴 생성'));
++    await waitFor(() => expect(calls.map((c) => c[0])).toEqual(['PUT', 'GENERATE']));
++    expect(calls[0][1]).toMatchObject({ plan_unit: 'month', plan_length: 3, focus_regions: ['squat', 'pull', 'core'] });
++    expect(calls[0][1]).not.toHaveProperty('experience_detail');
++  });
++
++  it('groups a monthly plan into months, weeks and days with the current week open', async () => {
++    const created = new Date(Date.now() - 9 * 86400000).toISOString();
++    mockFetch({ '/api/exercise-routines': [{ ...routine, created_at: created, period_unit: 'month', period_length: 2, duration_weeks: 8 }], '/api/adaptive': [] });
++    render(<MemoryRouter><RoutinePage /></MemoryRouter>);
++
++    expect(await screen.findByRole('button', { name: /1개월차/ })).toBeTruthy();
++    expect(screen.getByRole('button', { name: /2개월차/ }).getAttribute('aria-expanded')).toBe('false');
++    expect(screen.getByRole('button', { name: /2주차/ }).getAttribute('aria-expanded')).toBe('true');
++    expect(screen.getByText('이번 주')).toBeTruthy();
++    expect(screen.getByRole('button', { name: /1주차/ }).getAttribute('aria-expanded')).toBe('false');
++    // Only the open week mounts its day cards.
++    expect(screen.getAllByText('1일차 · 2개 운동')).toHaveLength(1);
++    fireEvent.click(screen.getByRole('button', { name: /2개월차/ }));
++    expect(screen.getByRole('button', { name: /8주차/ })).toBeTruthy();
++  });
++
++  it('shows a one-day plan without week groups', async () => {
++    mockFetch({ '/api/exercise-routines': [{ ...routine, period_unit: 'day', period_length: 1, duration_weeks: 0, days_per_week: 1 }], '/api/adaptive': [] });
++    render(<MemoryRouter><RoutinePage /></MemoryRouter>);
++    expect(await screen.findByText('하루 루틴')).toBeTruthy();
++    expect(screen.queryByRole('button', { name: /주차/ })).toBeNull();
++    expect(screen.getByText('1일차 · 2개 운동')).toBeTruthy();
++  });
+ });
++
+diff --git a/frontend/tests/WorkoutMode.test.jsx b/frontend/tests/WorkoutMode.test.jsx
+index ab6ccf3..b71fdc7 100644
+--- a/frontend/tests/WorkoutMode.test.jsx
++++ b/frontend/tests/WorkoutMode.test.jsx
+@@ -32,5 +32,5 @@ it('skips each exercise without saving completion or losing access to the final
+  expect(screen.getAllByRole('button',{name:'이 운동 건너뛰기'})).toHaveLength(1);
+  await user.type(screen.getByLabelText('이번 세트 반복 횟수'),'5');await user.click(screen.getByRole('button',{name:'이 운동 건너뛰기'}));
+  expect(await screen.findByText('운동 따라하기 · 2 / 2')).toBeTruthy();await user.click(screen.getByRole('button',{name:'이 운동 건너뛰기'}));
+- expect(await screen.findByText('오늘의 운동 결과')).toBeTruthy();expect(HealthAPI.createWorkout).not.toHaveBeenCalled();expect(screen.getByLabelText('운동 1 실제 운동 분').value).toBe('0');expect(screen.getByLabelText('운동 2 실제 운동 분').value).toBe('0');expect(screen.queryByText('자동 진행 중')).toBeNull();
++ expect(await screen.findByText('오늘의 운동 결과')).toBeTruthy();expect(HealthAPI.createWorkout).not.toHaveBeenCalled();expect(screen.queryByText('자동 진행 중')).toBeNull();
+ });
+diff --git a/frontend/tests/WorkoutRecovery.test.jsx b/frontend/tests/WorkoutRecovery.test.jsx
+index 669e3e1..0b480df 100644
+--- a/frontend/tests/WorkoutRecovery.test.jsx
++++ b/frontend/tests/WorkoutRecovery.test.jsx
+@@ -4,7 +4,6 @@ import {render,screen,fireEvent,act,cleanup,renderHook} from '@testing-library/r
+ import catalog from '../src/shared/lib/localCatalog.json';
+ import {STRETCHES,recommendStretches} from '../src/health/components/exercise/stretchCatalog.js';
+ import {poseJoints,REST,BONES} from '../src/health/components/exercise/rig.js';
+-import {estimateCalories,recordedActiveMinutes} from '../src/health/components/exercise/workoutCalories.js';
+ import WorkoutResults from '../src/health/components/exercise/WorkoutResults.jsx';
+ import StretchRecovery from '../src/health/components/exercise/StretchRecovery.jsx';
+ import useTempoSession from '../src/health/components/exercise/useTempoSession.js';
+@@ -19,15 +18,10 @@ it('skips all remaining sets/rest, never creates work time, preserves pause and
+  act(()=>result.current.skipExercise());expect(result.current.state.status).toBe('complete');expect(result.current.state.skipped).toEqual([0,1]);expect(result.current.state.workMs[1]).toBeUndefined();
+  act(()=>result.current.start());expect(result.current.state.skipped).toEqual([]);expect(result.current.state.workMs).toEqual({});
+ });
+-it('uses actual active time, does not convert rest-inclusive logs or muscle mass into calories',()=>{
+- expect(estimateCalories(70,10,3.5)).toEqual({gross:42.875,active:30.625});expect(estimateCalories(80,10,3.5).gross).toBeGreaterThan(42.875);
+- expect(estimateCalories(70,-1,3.5)).toBeNull();expect(estimateCalories(0,10,3.5)).toBeNull();expect(estimateCalories(70,NaN,3.5)).toBeNull();
+- expect(recordedActiveMinutes({actual_minutes:30})).toBe('');expect(recordedActiveMinutes({actual_minutes:30,timed_sets_seconds:[20,40]})).toBe('1');
+- render(<WorkoutResults exercises={exercises} measurement={{weight:70,skeletal_muscle_mass:32}} skipped={[1]} workMs={{0:60000}}/>);
+- expect(screen.getByLabelText('스쿼트 실제 운동 분').value).toBe('');expect(screen.getByLabelText('컬 실제 운동 분').value).toBe('0');
+- fireEvent.click(screen.getByText('실제 시간 확인 · 칼로리 계산'));expect(screen.getByRole('alert')).toBeTruthy();
+- fireEvent.change(screen.getByLabelText('스쿼트 실제 운동 분'),{target:{value:'10'}});fireEvent.click(screen.getByText('실제 시간 확인 · 칼로리 계산'));
+- expect(screen.getByText('운동 시간 동안의 예상 소모량')).toBeTruthy();expect(screen.getByText('약 47 kcal')).toBeTruthy();expect(screen.getByText('약 0 kcal')).toBeTruthy();
++it('shows only recovery stretching after a workout, without calorie or actual-time inputs',()=>{
++ render(<WorkoutResults exercises={exercises} skipped={[1]}/>);
++ expect(screen.getByTestId('stretch-model')).toBeTruthy();
++ expect(screen.queryByText(/칼로리/)).toBeNull();expect(screen.queryByLabelText(/실제 운동 분/)).toBeNull();
+ });
+ it('authors 30 distinct rigged stretches with finite joints and constant segment lengths through their complete cycles',()=>{
+  expect(STRETCHES).toHaveLength(30);const poses=new Set();
+@@ -52,17 +46,25 @@ it('automatically prepares, plays both sides, moves to the next stretch, pauses
+  const second=screen.getByTestId('stretch-model').dataset.motion;fireEvent.click(screen.getByText('이 스트레칭 건너뛰기'));expect(screen.getByTestId('stretch-model').dataset.motion).not.toBe(second);
+  fireEvent.click(screen.getByText('스트레칭 종료'));expect(screen.queryByTestId('stretch-model')).toBeNull();
+ });
++it('keeps advancing to the next stretch when loading the next model stalls a frame',()=>{
++ vi.useFakeTimers();let now=0;vi.spyOn(performance,'now').mockImplementation(()=>now);
++ render(<StretchRecovery exercises={exercises}/>);
++ const first=screen.getByTestId('stretch-model').dataset.motion;
++ // A 3-second stall used to pause the sequence at every new stretch.
++ act(()=>{now+=3000;vi.advanceTimersByTime(40);});
++ expect(screen.getByText('자동 진행 중')).toBeTruthy();
++ for(let i=0;i<2000&&screen.getByTestId('stretch-model').dataset.motion===first;i++)act(()=>{now+=33;vi.advanceTimersByTime(34);});
++ expect(screen.getByTestId('stretch-model').dataset.motion).not.toBe(first);
++ expect(screen.getByText('자동 진행 중')).toBeTruthy();
++});
++it('continues through the rest of the full list after choosing a stretch there',()=>{
++ render(<StretchRecovery exercises={exercises} autoStart={false}/>);
++ fireEvent.click(screen.getByText('전체 30가지 · 동작 바꾸기'));
++ fireEvent.click(screen.getAllByRole('button',{pressed:false}).find(b=>b.classList.contains('stretch-choice')));
++ expect(screen.getByText(/^1 \/ 30/)).toBeTruthy();
++});
+ it('does not automatically stretch after a pain stop or when every exercise was skipped',()=>{
+  const view=render(<StretchRecovery exercises={exercises} pain/>);expect(screen.queryByText('자동 진행 중')).toBeNull();expect(screen.getByRole('alert')).toBeTruthy();view.unmount();
+  render(<WorkoutResults exercises={exercises} skipped={[0,1]}/>);expect(screen.queryByTestId('stretch-model')).toBeNull();cleanup();
+  render(<WorkoutResults exercises={exercises} records={[]} skipped={[1]}/>);expect(screen.queryByTestId('stretch-model')).toBeNull();
+ });
+-it('imports only empty timer durations and keeps manual and skipped values until user confirms calories',()=>{
+- render(<WorkoutResults exercises={[...exercises,{exercise_id:'p',motion_id:'plank',exercise_name:'플랭크'}]} skipped={[1]} workMs={{0:90000,1:20000,2:30000}} measurement={{weight:70}}/>);
+- fireEvent.change(screen.getByLabelText('플랭크 실제 운동 분'),{target:{value:'2'}});
+- fireEvent.click(screen.getByRole('button',{name:'빈 시간에 운동 타이머 값 가져오기'}));
+- expect(screen.getByLabelText('스쿼트 실제 운동 분').value).toBe('1.5');
+- expect(screen.getByLabelText('컬 실제 운동 분').value).toBe('0');
+- expect(screen.getByLabelText('플랭크 실제 운동 분').value).toBe('2');
+- expect(screen.queryByText('운동 시간 동안의 예상 소모량')).toBeNull();
+-});
+-- 
+2.43.0
+
