@@ -142,9 +142,9 @@ export function evaluateRules(id,p,angle,previous){
 }
 
 export class PoseCalibration{
- constructor(){this.start=null;this.last=null;this.ready=false;}
+ constructor(required){this.required=required||[0,11,12,23,24,25,26,27,28];this.start=null;this.last=null;this.ready=false;}
  update(poses,time){
-  const p=poses?.[0],ids=[0,11,12,23,24,25,26,27,28];
+  const p=poses?.[0],ids=this.required;
   const visible=poses?.length===1&&ids.every(i=>p?.[i]&&[p[i].x,p[i].y,p[i].visibility].every(Number.isFinite)&&p[i].visibility>=T.visibility&&p[i].x>.03&&p[i].x<.97&&p[i].y>.03&&p[i].y<.97);
   const center=visible&&(p[23].x+p[24].x)/2;
   const span=visible?Math.max(...['x','y'].map(axis=>Math.max(...ids.map(i=>p[i][axis]))-Math.min(...ids.map(i=>p[i][axis])))):0;

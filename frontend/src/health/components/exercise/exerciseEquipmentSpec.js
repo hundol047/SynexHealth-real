@@ -7,7 +7,7 @@ export const EQUIPMENT_BY_MOTION = Object.freeze({
   band_row: 'band_row', band_pull_apart: 'band_pull_apart',
   curl: 'dumbbell', hammer_curl: 'dumbbell', shoulder_press: 'dumbbell', lateral_raise: 'dumbbell',
   front_raise: 'dumbbell', dumbbell_row: 'dumbbell', dumbbell_rdl: 'dumbbell', dumbbell_split_squat: 'dumbbell',
-  dumbbell_shrug: 'dumbbell', goblet_squat: 'single_dumbbell', triceps_extension: 'single_dumbbell',
+  dumbbell_shrug: 'dumbbell', goblet_squat: 'single_dumbbell', triceps_extension: 'dumbbell',
   dumbbell_floor_press: 'dumbbell', dumbbell_bench_press: 'bench_dumbbell',
   barbell_rdl: 'barbell', barbell_squat: 'barbell', barbell_bench_press: 'bench_barbell',
   machine_chest_press: 'machine_chest_press', machine_row: 'machine_row', lat_pulldown: 'lat_pulldown',

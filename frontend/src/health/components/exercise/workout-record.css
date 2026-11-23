@@ -31,6 +31,7 @@
 .workout-feedback-grid > label > span {
  align-self: end;
 }
+.workout-feedback-grid > label > small{font-size:12px;line-height:1.5;color:var(--muted);font-weight:400}
 .workout-feedback-grid .text-input {
  width: 100%;
  min-width: 0;

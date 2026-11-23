@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { handRestFrame } from './exerciseGrip.js';
+import { orientation, repetition } from './poseMath.js';
 
 // Authored demonstrations. World support anchors and two-bone IK replace the
 // old 2D-to-3D projection; these paths are not captured or personal biomechanics.
@@ -18,13 +20,17 @@ const ease = (a, b, value) => {
   const t = THREE.MathUtils.clamp((value - a) / (b - a), 0, 1);
   return t * t * t * (t * (t * 6 - 15) + 10);
 };
-const rep = t => ease(.07, .42, t) * (1 - ease(.58, .94, t));
+const rep = repetition;
 const normalized = p => vec(p).normalize();
 
-function solveLimb(origin, target, upper, lower, toward) {
+// `soft` eases a free limb toward full extension (see poseMath.solveTwoBone). Supporting hands and
+// planted feet keep the exact clamp so their contact points do not move.
+function solveLimb(origin, target, upper, lower, toward, soft = false) {
   const direction = vec(target).sub(vec(origin));
-  const requested = direction.length();
+  let requested = direction.length();
   if (requested < 1e-8) direction.set(0, -1, 0); else direction.divideScalar(requested);
+  const reach = upper + lower, margin = .02 * reach;
+  if (soft && requested > reach - margin) requested = reach - margin + margin * (1 - Math.exp(-(requested - (reach - margin)) / margin));
   const distance = THREE.MathUtils.clamp(requested, Math.abs(upper - lower) + 1e-6, upper + lower - 1e-6);
   const along = (upper * upper + distance * distance - lower * lower) / (2 * distance);
   const height = Math.sqrt(Math.max(0, upper * upper - along * along));
@@ -120,7 +126,7 @@ export function standingCatalogPose(id, progress, rest) {
   } else if (id === 'wall_push' || id === 'close_wall_push') {
     // A wall press ends before the forehead reaches the support. The previous
     // .33-radian lean drove the head through a wall sized only for the palms.
-    tilt = .15 + .095 * bend;
+    tilt = .15 + .070 * bend;
     const reach = (length(9, 10) + length(10, 11) + length(12, 13) + length(13, 14)) / 2;
     const lateral = Math.abs(rest[11][0] - rest[9][0]);
     const bodyAxis = Math.sqrt((reach * .994) ** 2 - lateral ** 2) + .04 * h;
@@ -277,7 +283,9 @@ export function standingCatalogPose(id, progress, rest) {
       const opening = id === 'thoracic_rotation' ? 1 : bend;
       target = vec(joints[root]).add(new THREE.Vector3(side * mix(.06, .41, opening) * h, -.06 * h, mix(.26, -.04, opening) * h).applyQuaternion(rotation)).toArray();
       toward = [side, -.4, 0];
-      hand = normalized([side, 0, .08]).applyQuaternion(rotation).toArray();
+      // Fingers follow the forearm through opening instead of pointing sideways
+      // while the forearm still faces forward (a >120 degree wrist bend).
+      hand = null;
     } else if (id === 'wall_hinge') {
       // Hands rest in front of the lower ribs. Letting them hang behind the
       // hips made a fingertip, rather than the buttocks, determine wall contact.
@@ -291,7 +299,7 @@ export function standingCatalogPose(id, progress, rest) {
     } else if (seated || id === 'wall_sit') {
       target = [side * .20 * h, (.75 - (id === 'hamstring_stretch' ? .10 * bend : 0)) * h, (.23 + (id === 'hamstring_stretch' ? .13 * bend : 0)) * h];
       toward = [side * .3, -1, 0];
-      hand = [0, -1, .1];
+      hand = null; // Rested hands follow the forearm instead of bending down at the wrist.
     } else if (id === 'standing_knee_crunch') {
       target = [side * .15 * h, joints[root][1] - .17 * h - .08 * h * lift, joints[root][2] + .24 * h];
       toward = [side * .5, -1, 0];
@@ -306,17 +314,14 @@ export function standingCatalogPose(id, progress, rest) {
       target = [joints[root][0] + side * .02 * h, joints[root][1] - (brisk ? .30 : .39) * h, joints[root][2] + (brisk ? .18 : .13) * h * swing + (brisk ? .12 : .03) * h];
       toward = [0, -.2, 1];
     }
-    [joints[elbow], joints[wrist]] = solveLimb(joints[root], target, upper, lower, toward);
+    [joints[elbow], joints[wrist]] = solveLimb(joints[root], target, upper, lower, toward, id === 'hamstring_stretch');
     const direction = hand ? normalized(hand) : vec(joints[wrist]).sub(vec(joints[elbow])).normalize();
     joints[finger] = vec(joints[wrist]).addScaledVector(direction, length(wrist, finger)).toArray();
     if (id === 'wall_push' || id === 'close_wall_push' || id === 'calf_stretch') {
-      // Rotate the calibrated floor-palm frame into a vertical support plane:
-      // fingers face up and the palm faces the wall. Wrist centers remain
-      // behind the wall by the palm thickness rather than inside the glass.
-      const floorPalm = new THREE.Quaternion().setFromUnitVectors(vec(rest[finger]).sub(vec(rest[wrist])).normalize(), new THREE.Vector3(0, 0, 1));
-      const palmRoll = rest.wallSupport?.palmRoll?.[i] ?? side * .9;
-      floorPalm.premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), palmRoll));
-      const palmRotation = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2).multiply(floorPalm);
+      // Map the anatomical hand frame directly onto the vertical support:
+      // fingers up, palm forward. Keep the wrist behind the contact plane.
+      const {along,back}=handRestFrame(rest,i);
+      const palmRotation=orientation([0,1,0],[0,0,-1]).multiply(orientation(along.toArray(),back.toArray()).invert());
       joints.boneRotations[12 + i] = palmRotation.toArray();
       // Preserve the palm's roll through the lower arm. A shortest-direction
       // forearm rotation twisted the blended wrist skin through the wall even

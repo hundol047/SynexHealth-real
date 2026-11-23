@@ -77,7 +77,7 @@ export function bodyweightPoseJoints(id, progress, rest) {
     hip = new THREE.Vector3(0, ankleY, ankleZ).addScaledVector(axis, bodyLength);
     pelvisTilt = Math.acos(rise);
   } else if (bridge) {
-    const shoulderY = .09 * h, y = .155 * h + .175 * h * bend;
+    const shoulderY = .114 * h, y = .155 * h + .175 * h * bend;
     hip = new THREE.Vector3(0, y, -.55 * h + Math.sqrt(Math.max(0, torsoLength ** 2 - (y - shoulderY) ** 2)));
     axis = new THREE.Vector3(0, shoulderY, -.55 * h).sub(hip).normalize();
     ankles = [[rest[11][0], .10 * h, .42 * h], [rest[14][0], .10 * h, .42 * h]];
@@ -119,7 +119,8 @@ export function bodyweightPoseJoints(id, progress, rest) {
   joints[0] = hip.toArray();
   joints[1] = hip.clone().addScaledVector(axis, torsoLength).toArray();
   // Supine neck stays supported; other movements keep the cervical spine neutral.
-  joints[2] = v(joints[1]).addScaledVector(bridge ? new THREE.Vector3(0, 0, -1) : axis, neckLength).toArray();
+  const bridgeNeck = new THREE.Vector3(0, -.024 * h, -Math.sqrt(neckLength ** 2 - (.024 * h) ** 2)).normalize();
+  joints[2] = v(joints[1]).addScaledVector(bridge ? bridgeNeck : axis, neckLength).toArray();
   const torsoRotation = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), axis);
   const pelvisRotation = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), pelvisTilt);
   for (const [root, parent] of [[3, 1], [6, 1], [9, 0], [12, 0]]) {
@@ -143,27 +144,28 @@ export function bodyweightPoseJoints(id, progress, rest) {
       const bodyLength = Math.sqrt(Math.max(0, (leg * .998) ** 2 - (rest[11][0] - rest[9][0]) ** 2)) + .04 * h;
       const rise = (.05 * h + (length(3, 4) + length(6, 7)) / 2 - ankles[index][1] - .005 * h) / (bodyLength + torsoLength);
       const shoulderZ = ankles[index][2] + (bodyLength + torsoLength) * Math.sqrt(1 - rise ** 2);
-      target = [rest[root][0], .05 * h - (rest.plankWristDrop ?? 0), shoulderZ + lower];
+      target = [rest[root][0], .05 * h, shoulderZ + lower];
       toward = [0, -1, 0];
     } else if (bridge) {
       target = [rest[root][0] + side * .045 * h, .047 * h, -.55 * h + (upper + lower) * .955];
       toward = [side, 0, 0];
     } else if (hinge) {
       target = [joints[root][0] + side * .015 * h, joints[root][1] - (upper + lower) * .97, joints[root][2] + .015 * h];
-      toward = [0, 0, 1];
+      // Elbows soften backward; a forward pole bent the hanging arms the wrong way.
+      toward = [side * .3, 0, -1];
     } else {
-      // Keep the hands at chest height with space between the fingertips.
-      const counterbalance = id === 'squat' ? .13 * bend : .015 * bend;
-      target = [hip.x + side * .132 * h, joints[root][1] - .17 * h, joints[root][2] + .20 * h + counterbalance];
+      // Relaxed clasp in front of the sternum, rather than locked-out robot arms.
+      const counterbalance = id === 'squat' ? .06 * bend : .015 * bend;
+      target = [hip.x + side * .12 * h, joints[root][1] - .17 * h, joints[root][2] + .20 * h + counterbalance];
       toward = [side * .5, -1, -.1];
     }
     [joints[elbow], joints[wrist]] = limb(joints[root], target, upper, lower, toward);
     const finger = index === 0 ? 17 : 18;
-    const handDirection = push || plank || bridge ? new THREE.Vector3(0, 0, 1) : hinge ? v(joints[wrist]).sub(v(joints[elbow])).normalize() : new THREE.Vector3(-side * .41, .14, .90).normalize();
+    const handDirection = push || plank || bridge ? new THREE.Vector3(0, 0, 1) : hinge ? v(joints[wrist]).sub(v(joints[elbow])).normalize() : new THREE.Vector3(-side * .72, -.04, .69).normalize();
     joints[finger] = v(joints[wrist]).addScaledVector(handDirection, length(wrist, finger)).toArray();
   }
   // Palm pronation cannot be inferred from a wrist-to-finger direction alone.
   // Keep this authored roll on the pose so surface skinning matches the support.
-  if (push || plank || bridge) joints.handRoll = [.90, -.90];
+  if (push || bridge) joints.handRoll = [.90, -.90];
   return joints;
 }

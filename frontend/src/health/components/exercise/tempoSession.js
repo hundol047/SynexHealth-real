@@ -9,10 +9,12 @@ export function recommendedRest(exercise){
  const planned=Number(exercise.rest_seconds);
  if(exercise.rest_seconds!=null&&Number.isFinite(planned))return {seconds:clamp(Math.round(planned),10,120),reason:'내 루틴에 설정된 휴식'};
  const id=exercise.motion_id,guide=getMotionGuide(id);
- if(recovery.has(id))return {seconds:20,reason:'가벼운 가동성 운동 후 호흡 정리'};
- if(demanding.has(id))return {seconds:90,reason:'큰 근육을 쓰거나 한쪽씩 지지하는 동작의 회복'};
+ if(['sit_stand','wall_push','close_wall_push','scapular','hinge','wall_hinge','calf','seated_calf'].includes(id))return {seconds:30,reason:'가벼운 맨몸 동작의 세트 사이 회복'};
+ if(recovery.has(id))return {seconds:15,reason:'가벼운 가동성 운동 후 호흡 정리'};
+ if(exercise.equipment?.length)return {seconds:demanding.has(id)?90:60,reason:'기구 운동의 자세와 다음 세트 수행을 위한 회복'};
+ if(demanding.has(id))return {seconds:60,reason:'큰 근육을 쓰거나 한쪽씩 지지하는 동작의 회복'};
  if(guide?.kind==='hold')return {seconds:45,reason:'몸통 지지와 호흡 회복'};
- return {seconds:60,reason:'다음 세트의 자세를 유지하기 위한 기본 회복'};
+ return {seconds:45,reason:'다음 세트의 자세를 유지하기 위한 기본 회복'};
 }
 export function tempoPrescription(exercise){
  const guide=getMotionGuide(exercise.motion_id);
@@ -21,18 +23,22 @@ export function tempoPrescription(exercise){
  const perSide=/각|쪽|좌우|each/i.test(String(exercise.reps));
  const reps=clamp(Number(numbers[0])||8,1,exercise.coachRestSeconds!=null?999:100)*(guide?.kind==='alternating'&&perSide?2:1);
  const seconds=kind==='hold'?positive(exercise.hold_seconds,30):positive(exercise.duration_seconds,Number(String(exercise.duration||'').match(/([\d.]+)\s*분/)?.[1])*60||60);
- return {kind,reps,sets:clamp(Math.round(positive(exercise.sets,2)),1,20),seconds:clamp(seconds,exercise.coachRestSeconds!=null?1:5,3600),cycleMs:guide?.durationMs||7000,alternating:guide?.kind==='alternating',guide};
+ return {kind,reps,sets:clamp(Math.round(positive(exercise.sets,kind==='duration'?1:2)),1,20),seconds:clamp(seconds,exercise.coachRestSeconds!=null?1:5,3600),cycleMs:guide?.durationMs||7000,alternating:guide?.kind==='alternating',guide};
 }
 export function buildTempoPlan(exercises,{speed=1,restOverrides={}}={}){
  const segments=[];
  exercises.forEach((exercise,index)=>{
   const p=tempoPrescription(exercise),rate=clamp(positive(speed,1),.5,1.5);
   const cycleMs=p.cycleMs/rate,repMs=cycleMs/(p.alternating?2:1);
-  const restSeconds=restOverrides[index] ?? recommendedRest(exercise).seconds;
-  segments.push({kind:'prepare',exerciseIndex:index,set:1,durationMs:5000});
+  // A trainer's prescription may set any rest, including none; app routines keep 10–120 s.
+  const coach=Number.isInteger(exercise.coachRestSeconds);
+  const restSeconds=coach?clamp(Number(restOverrides[index]??recommendedRest(exercise).seconds)||0,0,300):clamp(positive(restOverrides[index],recommendedRest(exercise).seconds),10,120);
+  if(index===0)segments.push({kind:'prepare',exerciseIndex:index,set:1,durationMs:5000});
   for(let set=1;set<=p.sets;set++){
    segments.push({kind:'work',exerciseIndex:index,set,durationMs:p.kind==='reps'?repMs*p.reps:p.seconds*1000,cycleMs,repMs,prescription:p});
-   if(restSeconds>0)segments.push({kind:'rest',exerciseIndex:index,set,durationMs:restSeconds*1000,final:set===p.sets,nextExerciseIndex:set===p.sets?index+1:index});
+   if(set<p.sets){if(restSeconds>0)segments.push({kind:'rest',restType:'set',exerciseIndex:index,set,durationMs:restSeconds*1000,final:false,nextExerciseIndex:index,reason:'다음 세트를 위한 회복'});}
+   else if(coach){if(restSeconds>0)segments.push({kind:'rest',restType:index<exercises.length-1?'transition':'final',exerciseIndex:index,set,durationMs:restSeconds*1000,final:true,nextExerciseIndex:index+1,reason:'트레이너가 설정한 휴식'});}
+   else if(index<exercises.length-1){const transition=coach?restSeconds:clamp(positive(exercise.transition_seconds,Math.min(restSeconds,30)),10,120);if(transition>0)segments.push({kind:'rest',restType:'transition',exerciseIndex:index,set,durationMs:transition*1000,final:true,nextExerciseIndex:index+1,reason:coach?'트레이너가 설정한 휴식':'다음 동작의 자세·장비를 준비하는 시간'});}
   }
  });
  return segments;

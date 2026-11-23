@@ -8,9 +8,47 @@ import ExerciseMotion from '../src/health/components/exercise/ExerciseMotion.jsx
 import { MOTIONS,armMachinePivot,samplePose } from '../src/health/components/exercise/motions.js';
 import { resolveBodyProfile } from '../src/health/components/body3d/bodyProfiles.js';
 
-vi.mock('../src/health/components/exercise/ExerciseMotion3D.jsx',()=>({default:({progress})=> <div data-testid="motion-render" data-progress={progress}>3D 시범</div>}));
+const readiness=vi.hoisted(()=>({hold:false,ready:null}));
+vi.mock('../src/health/components/exercise/ExerciseMotion3D.jsx',()=>({default:({progress,onReady})=> {React.useEffect(()=>{readiness.ready=onReady;if(!readiness.hold)onReady?.();},[onReady]);return <div data-testid="motion-render" data-progress={progress}>3D 시범</div>;}}));
 
 describe('motion guidance',()=>{
+  it('refreshes transient zero-size observations but pauses when the viewer really leaves',async()=>{
+    let callback,observer;
+    vi.stubGlobal('IntersectionObserver',class {
+      constructor(cb){callback=cb;observer=this;}
+      observe=vi.fn();unobserve=vi.fn();disconnect=vi.fn();
+    });
+    const {container,unmount}=render(<ExerciseMotion autoPlay exercise={{motion_id:'squat',instructions:[],cautions:[]}}/>);
+    // The 3D renderer is loaded on demand; observation starts once its scene is ready.
+    await screen.findByTestId('motion-render');
+    await act(async()=>{});
+    vi.useFakeTimers();
+    const target=container.querySelector('.motion-viewer');
+    const visible={x:0,y:100,top:100,left:0,right:300,bottom:700,width:300,height:600};
+    vi.spyOn(target,'getBoundingClientRect').mockReturnValue(visible);
+    try{
+      act(()=>callback([{target,isIntersecting:true,boundingClientRect:visible}]));
+      act(()=>callback([{target,isIntersecting:false,boundingClientRect:{width:0,height:0}}]));
+      act(()=>vi.advanceTimersByTime(400));
+      expect(screen.getByRole('button',{name:'일시정지',exact:true})).toBeTruthy();
+      expect(observer.unobserve).toHaveBeenCalledWith(target);
+      act(()=>callback([{target,isIntersecting:false,boundingClientRect:{...visible,y:2000,top:2000,bottom:2600}}]));
+      act(()=>vi.advanceTimersByTime(400));
+      expect(screen.getByRole('button',{name:'동작 재생',exact:true})).toBeTruthy();
+    }finally{unmount();vi.unstubAllGlobals();vi.useRealTimers();}
+  });
+  it('autoplays a newly opened guide and permits immediate pause',()=>{
+    const exercise={motion_id:'squat',exercise_name:'스쿼트',instructions:[],cautions:[]};
+    const {rerender}=render(<ExerciseMotion autoPlay exercise={exercise}/>);
+    expect(screen.getByRole('button',{name:'일시정지',exact:true})).toBeTruthy();
+    fireEvent.click(screen.getByRole('button',{name:'일시정지',exact:true}));
+    expect(screen.getByRole('button',{name:'동작 재생',exact:true})).toBeTruthy();
+    rerender(<ExerciseMotion autoPlay exercise={{...exercise,motion_id:'leg_press'}}/>);
+    expect(screen.getByRole('button',{name:'일시정지',exact:true})).toBeTruthy();
+    rerender(<ExerciseMotion autoPlay paused exercise={{...exercise,motion_id:'leg_press'}}/>);
+    expect(screen.getByRole('button',{name:'동작 재생',exact:true}).disabled).toBe(true);
+  });
+
   it('has finite, moving poses for every backend catalogue entry',()=>{
     const catalog=readFileSync('../backend/app/health/exercise_catalog.py','utf8');
     const ids=[...catalog.matchAll(/movement\('([^']+)'/g)].map(m=>m[1]);
@@ -184,4 +222,16 @@ describe('human body profiles',()=>{
     expect(female.hip).toBeGreaterThan(male.hip);
     expect(resolveBodyProfile(undefined).label).toContain('중립');
   });
+});
+
+it('keeps automatic preview at its first pose until the 3D renderer signals readiness',()=>{
+ readiness.hold=true;let nextFrame;
+ const raf=vi.spyOn(window,'requestAnimationFrame').mockImplementation(cb=>{nextFrame=cb;return 1;});
+ const cancel=vi.spyOn(window,'cancelAnimationFrame').mockImplementation(()=>{});
+ const {unmount}=render(<ExerciseMotion autoPlay exercise={{motion_id:'squat',exercise_name:'스쿼트',instructions:[],cautions:[]}}/>);
+ try{
+  expect(screen.getByTestId('motion-render').dataset.progress).toBe('0');expect(nextFrame).toBeUndefined();expect(screen.getByText(/운동 시범을 준비하고 있습니다/)).toBeTruthy();
+  act(()=>readiness.ready());expect(screen.queryByText(/운동 시범을 준비하고 있습니다/)).toBeNull();
+  act(()=>nextFrame(0));act(()=>nextFrame(40));expect(Number(screen.getByTestId('motion-render').dataset.progress)).toBeGreaterThan(0);
+ }finally{unmount();raf.mockRestore();cancel.mockRestore();readiness.hold=false;readiness.ready=null;}
 });

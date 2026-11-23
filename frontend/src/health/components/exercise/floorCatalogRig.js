@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { bodyweightPoseJoints } from './bodyweightRig.js';
+import { handRestFrame } from './exerciseGrip.js';
 import { makeFrame, orientation, repetition, scaleFor, segmentLength, setFoot, setHand, solveLimb, vector } from './poseMath.js';
 
 export const FLOOR_CATALOG_IDS = new Set([
@@ -39,9 +40,8 @@ function orientLimbs(joints, rest, frame, includeHands = false) {
 function downwardPalm(joints, rest, side, direction) {
   const [wrist, finger] = side === 0 ? [5, 17] : [8, 18];
   setHand(joints, rest, side, direction);
-  const authored = new THREE.Quaternion().setFromUnitVectors(vector(rest[finger]).sub(vector(rest[wrist])).normalize(), new THREE.Vector3(0, 0, 1));
-  authored.premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), side === 0 ? .90 : -.90));
-  authored.premultiply(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), vector(direction).normalize()));
+  const {along,back}=handRestFrame(rest,side);
+  const authored=orientation(direction,[0,1,0]).multiply(orientation(along.toArray(),back.toArray()).invert());
   joints.boneRotations ||= {};
   joints.boneRotations[side + 12] = authored.toArray();
 }
@@ -76,7 +76,27 @@ function quadrupedFrame(rest, h) {
   const thigh = (length(rest, 9, 10) + length(rest, 12, 13)) / 2;
   // Knees directly below the hips and palms directly below the shoulders.
   // Anatomical lengths determine the table height rather than scaling a 2D pose.
-  const joints = makeFrame(rest, [0, .062 * h + thigh, -.26 * h], [0, 0, 1], [0, -1, 0]);
+  // Arm and thigh lengths differ. A horizontal torso at hip height folded
+  // the support elbows toward the mat. Fit the shoulder height to a nearly
+  // extended arm while preserving hip/knee contact heights and bone lengths.
+  const hip = [0, .062 * h + thigh, -.26 * h];
+  const baseline = makeFrame(rest, hip, [0, 0, 1], [0, -1, 0]);
+  const hipY = (baseline[9][1] + baseline[12][1]) / 2;
+  const frame = rise => {
+    const forward = Math.sqrt(1 - rise * rise);
+    const pose = makeFrame(rest, hip, [0, rise, forward], [0, -forward, rise]);
+    const shift = hipY - (pose[9][1] + pose[12][1]) / 2;
+    for (const point of pose) point[1] += shift;
+    return pose;
+  };
+  const reach = armIndices.reduce((sum, [a,b,c]) => sum + length(rest,a,b) + length(rest,b,c), 0) / 2;
+  let low = -.3, high = .65;
+  for (let i = 0; i < 24; i++) {
+    const middle = (low + high) / 2, pose = frame(middle);
+    const supportDistance = Math.hypot((pose[3][1] + pose[6][1]) / 2 - .047 * h, .02 * h, .03 * h);
+    if (supportDistance < reach * .99) low = middle; else high = middle;
+  }
+  const joints = frame((low + high) / 2);
   supportedNeck(joints, rest, [0, -.12, Math.sqrt(1 - .12 ** 2)], [0, -1, 0]);
   for (const [side, [hip, knee, ankle]] of legIndices.entries()) {
     joints[knee] = vector(joints[hip]).add(new THREE.Vector3(0, -length(rest, hip, knee), 0)).toArray();
@@ -94,7 +114,7 @@ function quadrupedFrame(rest, h) {
 
 function kneePushup(rest, t, h) {
   const thigh = (length(rest, 9, 10) + length(rest, 12, 13)) / 2;
-  const kneeY = .062 * h, kneeZ = -.34 * h;
+  const kneeY = .087 * h, kneeZ = -.34 * h;
   const palms = armIndices.map(([root], side) => [rest[root][0] + (side === 0 ? 1 : -1) * .035 * h, .047 * h, .50 * h]);
   // Solve the supported body's top angle once for the actual athlete's arm
   // lengths; palms stay on the mat throughout the lowering/pressing phase.
@@ -151,7 +171,7 @@ function heelTouch(rest, t, h) {
     const upper = length(rest, hip, knee), lower = length(rest, knee, ankle);
     const target = vector(joints[hip]).add(new THREE.Vector3(0, upper * .985, lower * .96));
     // The rounded shoe's heel, rather than its ankle center, touches the mat.
-    if (side === active) target.lerp(new THREE.Vector3(joints[hip][0], rest.heelContactY?.[side] ?? .083 * h, joints[hip][2] + .57 * h), amount);
+    if (side === active) target.lerp(new THREE.Vector3(joints[hip][0], rest.heelContactHeights?.[side]??.083 * h, joints[hip][2] + .57 * h), amount);
     solveLimb(joints, rest, side, 'leg', target.toArray(), [0, 1, 0]);
     floorFoot(joints, rest, side, pitch(-Math.PI / 2));
   }
@@ -207,7 +227,7 @@ function kneeSidePlank(rest, h) {
     const thigh = length(rest, hip, knee);
     // Adduct the upper thigh so the bent knees are stacked, rather than
     // leaving the entire free leg suspended a full pelvis width above support.
-    const kneeHeight = (.062 + (side === 0 ? .075 : 0)) * h;
+    const kneeHeight = (.082 + (side === 0 ? .075 : 0)) * h;
     const drop = THREE.MathUtils.clamp(joints[hip][1] - kneeHeight, -thigh * .97, thigh * .97);
     joints[knee] = vector(joints[hip]).add(new THREE.Vector3(0, -drop, -Math.sqrt(thigh * thigh - drop * drop))).toArray();
     const shin = new THREE.Vector3(.945, .18, -.27).normalize();
@@ -228,7 +248,7 @@ function kneeSidePlank(rest, h) {
 
 function clamshell(rest, t, h) {
   const axis = new THREE.Vector3(0, .015, Math.sqrt(1 - .015 ** 2));
-  const joints = makeFrame(rest, [0, .220 * h, -.21 * h], axis.toArray(), [1, 0, 0]);
+  const joints = makeFrame(rest, [0, .246 * h, -.21 * h], axis.toArray(), [1, 0, 0]);
   supportedNeck(joints, rest, [0, -.28, Math.sqrt(1 - .28 ** 2)], [1, 0, 0]);
   for (const [side, [hip, knee, ankle]] of legIndices.entries()) {
     const target = [joints[hip][0] + .34 * h, .090 * h + (side === 0 ? .026 * h : 0), joints[hip][2] - .51 * h];
@@ -250,7 +270,8 @@ function clamshell(rest, t, h) {
 
 function proneY(rest, t, h) {
   const rise = -.032;
-  const joints = makeFrame(rest, [0, .145 * h, -.10 * h], [0, rise, Math.sqrt(1 - rise * rise)], [0, -1, 0]);
+  // Fit the smoothed chest and clothing across both body profiles.
+  const joints = makeFrame(rest, [0, .150 * h, -.10 * h], [0, rise, Math.sqrt(1 - rise * rise)], [0, -1, 0]);
   supportedNeck(joints, rest, [0, .16, Math.sqrt(1 - .16 ** 2)], [0, -1, 0]);
   for (const [side, [hip, knee, ankle]] of legIndices.entries()) {
     const direction = new THREE.Vector3(0, -.04, -Math.sqrt(1 - .04 ** 2));
@@ -265,7 +286,9 @@ function proneY(rest, t, h) {
     joints[elbow] = vector(joints[shoulder]).addScaledVector(direction, length(rest, shoulder, elbow)).toArray();
     const lowerDirection = direction.clone().applyAxisAngle(new THREE.Vector3(sign, 0, 0), -.035);
     joints[wrist] = vector(joints[elbow]).addScaledVector(lowerDirection, length(rest, elbow, wrist)).toArray();
-    downwardPalm(joints, rest, side, direction.toArray());
+    // Rest the open fingers along the mat rather than continuing the arm's
+    // downward slope through it. The wrist extension is small and symmetric.
+    downwardPalm(joints, rest, side, [direction.x, .04 * lift, direction.z]);
   }
   orientLimbs(joints, rest, orientation([0, rise, Math.sqrt(1 - rise * rise)], [0, -1, 0]));
   joints.equipment = { kind: 'mat', neckSupport: { position: [0, .020 * h, joints[2][2] + .05 * h], size: [.23 * h, .035 * h, .20 * h] } };
@@ -286,6 +309,11 @@ export function floorCatalogPose(id, progress, rest) {
               : id === 'knee_side_plank' ? kneeSidePlank(rest, h)
                 : id === 'clamshell' ? clamshell(rest, t, h)
                   : proneY(rest, t, h);
+  // In a supine pose a raised thigh points almost opposite its rest axis.
+  // Solving that rotation in world space can choose a sideways half turn,
+  // folding the gluteal surface into the leg. Transport from the lying body
+  // frame first so hip flexion keeps the pelvis and thigh facing together.
+  if(id==='dead_bug'||id==='heel_slide')orientLimbs(joints,rest,new THREE.Quaternion().fromArray(joints.boneRotations[0]));
   joints.equipment ||= { kind: 'mat' };
   return joints;
 }

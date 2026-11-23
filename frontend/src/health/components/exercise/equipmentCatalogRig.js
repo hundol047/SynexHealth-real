@@ -34,7 +34,6 @@ export function equipmentCatalogPose(id, progress, rest) {
   const leg = [[9, 10, 11, 15], [12, 13, 14, 16]];
   const data = { type: id, scale: h };
   const point = (x, y, z) => [x * h, y * h, z * h];
-  const soleOffset = side => v(rest.soleOffsets?.[side] ?? point(0, -.10, .065));
   const setFrame = (hip, axis = [0, 1, 0], pelvisAxis = [0, 1, 0]) => {
     const direction = unit(axis);
     joints[0] = hip.slice();
@@ -70,7 +69,9 @@ export function equipmentCatalogPose(id, progress, rest) {
     setArm(i, v(joints[root]).add(new THREE.Vector3(side * .025 * h, -reach * .98, .025 * h)).toArray());
   });
   const averageShin = (length(10, 11) + length(13, 14)) / 2;
-  const seatedHipY = .10 * h + averageShin + (rest[0][1] - rest[9][1]);
+  // Leg-curl shoes sweep below the neutral ankle when the knee folds back.
+  // Raise the seat, knee pivot and attached machine together for clearance.
+  const seatedHipY = (id==='seated_leg_curl' ? .145 : .10) * h + averageShin + (rest[0][1] - rest[9][1]);
   const seatedFrame = (tilt = 0) => {
     setFrame([0, seatedHipY, 0], [0, Math.cos(tilt), Math.sin(tilt)]);
     // Joint centers sit above the supporting skin surface. Place pads beneath
@@ -92,9 +93,9 @@ export function equipmentCatalogPose(id, progress, rest) {
     base.forEach((p, i) => { joints[i] = p.slice(); });
     for (let i = 0; i < 2; i++) {
       const side = i === 0 ? 1 : -1, root = arm[i][0];
-      if (id === 'goblet_squat') setArm(i, [side * .215 * h, joints[1][1] - .135 * h, joints[1][2] + .17 * h], [side * .5, -1, .1], [-side, 0, 0]);
-      else if (id === 'barbell_squat') setArm(i, [side * .33 * h, joints[1][1] - .015 * h, joints[1][2] + .07 * h], [side, -1, -.1], [0, 0, -.5]);
-      else setArm(i, [side * (id === 'barbell_rdl' ? .25 : .22) * h, joints[root][1] - (length(root, root + 1) + length(root + 1, root + 2)) * .975, joints[root][2] + .035 * h], [0, 0, 1]);
+      if (id === 'goblet_squat') setArm(i, [side * .215 * h, joints[1][1] - .135 * h, joints[1][2] + .17 * h], [side * .5, -1, .1]);
+      else if (id === 'barbell_squat') setArm(i, [side * .32 * h, joints[1][1] - .08 * h, joints[1][2] - .15 * h], [side, -1, -.3]);
+      else setArm(i, [side * (id === 'barbell_rdl' ? .25 : .22) * h, joints[root][1] - (length(root, root + 1) + length(root + 1, root + 2)) * .975, joints[root][2] + .035 * h], [side * .4, 0, -1]);
     }
     if (id === 'goblet_squat') data.grip = 'goblet';
   } else if (id === 'dumbbell_split_squat') {
@@ -105,7 +106,7 @@ export function equipmentCatalogPose(id, progress, rest) {
     setLeg(1, rear, [0, 0, 1], .58);
     relaxedArms();
   } else if (['dumbbell_bench_press', 'dumbbell_floor_press', 'barbell_bench_press'].includes(id)) {
-    const floor = id === 'dumbbell_floor_press', support = (floor ? .095 : .55) * h;
+    const floor = id === 'dumbbell_floor_press', support = (floor ? .100 : .55) * h;
     setFrame([0, support + .04 * h, .18 * h], [0, 0, -1], [0, 0, -1]);
     // The occiput rests on the same support plane as the upper back instead of
     // leaving the head floating above a bench or the mat.
@@ -129,7 +130,7 @@ export function equipmentCatalogPose(id, progress, rest) {
     relaxedArms();
     // Hands rest on the side supports; they do not dangle through the seat.
     if (['leg_extension', 'seated_leg_curl', 'machine_hip_abduction'].includes(id)) {
-      arm.forEach(([root], i) => setArm(i, [joints[root][0] + (i === 0 ? .025 : -.025) * h, joints[root][1] - (length(root, root + 1) + length(root + 1, root + 2)) * .975, .035 * h], [i === 0 ? 1 : -1, 0, .3], [0, 0, 1]));
+      arm.forEach(([root], i) => setArm(i, [joints[root][0] + (i === 0 ? .025 : -.025) * h, joints[root][1] - (length(root, root + 1) + length(root + 1, root + 2)) * .975, .035 * h], [i === 0 ? 1 : -1, 0, -.3], [0, 0, 1]));
     }
     if (id === 'leg_extension' || id === 'seated_leg_curl') {
       const theta = id === 'leg_extension' ? 1.38 * e : 1.18 - 1.50 * e;
@@ -161,7 +162,7 @@ export function equipmentCatalogPose(id, progress, rest) {
           target = [side * .14 * h, shoulder[1] - (.12 + .075 * e) * h, shoulder[2] + (.40 - .22 * e) * h];
           toward = [side * .1, -.1, -1];
         }
-        setArm(i, target, toward, [0, 0, 1]);
+        setArm(i, target, toward);
       }
       if (id === 'lat_pulldown') data.pulley = point(0, 1.91, .22);
       else if (id === 'cable_row') data.pulley = point(0, .58, 1.0);
@@ -172,13 +173,9 @@ export function equipmentCatalogPose(id, progress, rest) {
     data.back = { center: point(0, .69, -.57), angle: -.81 };
     for (let i = 0; i < 2; i++) setLeg(i, point(i === 0 ? .16 : -.16, .44 + .23 * e, .31 + .11 * e), [0, 1, .1], -.88);
     for (let i = 0; i < 2; i++) setArm(i, point(i === 0 ? .235 : -.235, .49, -.24), [i === 0 ? 1 : -1, -1, 0], [0, 0, 1]);
-    const rotation = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -.88);
-    const plateNormal = new THREE.Vector3(0, 1, 0).applyQuaternion(rotation);
-    const contacts = [11, 14].map((ankle, side) => {
-      joints.boneRotations[10 + side] = rotation.toArray();
-      return soleOffset(side).applyQuaternion(rotation).add(v(joints[ankle])).toArray();
-    });
-    data.footplate = { center: v(average(...contacts)).addScaledVector(plateNormal, -.03 * h).toArray(), normal: plateNormal.toArray() };
+    const feet = average(average(joints[11], joints[15]), average(joints[14], joints[16]));
+    const plateNormal = unit([0, .64, -.77]);
+    data.footplate = { center: v(feet).addScaledVector(plateNormal, -.085 * h).toArray(), normal: plateNormal.toArray() };
   } else if (id === 'stationary_cycle') {
     setFrame(point(0, .91, -.03), [0, Math.cos(.31), Math.sin(.31)]);
     data.seat = point(0, .70, -.03);
@@ -188,8 +185,8 @@ export function equipmentCatalogPose(id, progress, rest) {
       const phase = 2 * Math.PI * t + i * Math.PI;
       const pedal = point(i === 0 ? .14 : -.14, .40 + .18 * Math.cos(phase), .32 + .18 * Math.sin(phase));
       data.pedals.push(pedal);
-      setLeg(i, v(pedal).sub(soleOffset(i)).toArray(), [0, 0, 1]);
-      setArm(i, point(i === 0 ? .205 : -.205, 1.17, .49), [i === 0 ? .5 : -.5, -1, 0], [0, 0, 1]);
+      setLeg(i, v(pedal).add(new THREE.Vector3(0, .055 * h, -.045 * h)).toArray(), [0, 0, 1], .09 * Math.sin(phase));
+      setArm(i, point(i === 0 ? .205 : -.205, 1.17, .49), [i === 0 ? .5 : -.5, -1, 0]);
     }
   } else if (id === 'treadmill_walk' || id === 'elliptical') {
     const phi = 2 * Math.PI * t, elliptical = id === 'elliptical';
@@ -210,8 +207,8 @@ export function equipmentCatalogPose(id, progress, rest) {
       }
       setLeg(i, ankle, [0, 0, 1]);
       if (elliptical) {
-        data.pedals.push(v(joints[leg[i][2]]).add(soleOffset(i)).toArray());
-        setArm(i, point(side * .30, 1.30, .26 - .13 * Math.cos(phase)), [side * .5, -1, 0], [0, 1, 0]);
+        data.pedals.push(v(ankle).add(new THREE.Vector3(0, -.060 * h, .045 * h)).toArray());
+        setArm(i, point(side * .30, 1.30, .26 - .13 * Math.cos(phase)), [side * .5, -1, 0]);
       } else {
         const swing = -.23 * Math.cos(phase);
         armFK(i, [0, -Math.cos(swing), Math.sin(swing)], [0, -Math.cos(swing + .47), Math.sin(swing + .47)]);
@@ -226,20 +223,27 @@ export function equipmentCatalogPose(id, progress, rest) {
       const side = i === 0 ? 1 : -1, root = arm[i][0], shoulder = joints[root];
       if (id === 'curl' || id === 'hammer_curl') {
         const theta = .04 + 2.08 * e;
-        armFK(i, [side * .06, -.997, 0], [0, -Math.cos(theta), Math.sin(theta)]);
+        // Hanging dumbbell heads need room beside the thigh; the forearm returns to the
+        // sagittal plane as the elbow flexes. Straight-down forearms put the plates in the leg.
+        const clearance = (id === 'hammer_curl' ? .21 : .10) * (1 - e * e);
+        armFK(i, [side * .06, -.997, 0], [side * clearance, -Math.cos(theta), Math.sin(theta)]);
         if (id === 'hammer_curl') data.gripAxes = [0, 1].map(() => [0, Math.sin(theta), Math.cos(theta)]);
       } else if (id === 'shoulder_press') {
-        setArm(i, [side * (.32 - .105 * e) * h, shoulder[1] + (-.015 + .42 * e) * h, shoulder[2] + .065 * h], [side, .1, .1], [0, 1, 0]);
+        setArm(i, [side * (.32 - .105 * e) * h, shoulder[1] + (-.015 + .42 * e) * h, shoulder[2] + .065 * h], [side, -1, 0]);
       } else if (id === 'lateral_raise' || id === 'front_raise') {
         const theta = .04 + 1.31 * e, lateral = id === 'lateral_raise';
         armFK(i, lateral ? [side * Math.sin(theta), -Math.cos(theta), 0] : [0, -Math.cos(theta), Math.sin(theta)], lateral ? [side * Math.sin(theta), -Math.cos(theta), .12] : [0, -Math.cos(theta), Math.sin(theta + .075)]);
-        data.gripAxes = [[0, 0, 1], [0, 0, 1]];
+        // Palms down on both sides. One shared axis turned the second palm up
+        // and wrung that forearm half a turn at the elbow.
+        if (lateral) data.gripAxes = [[0, 0, 1], [0, 0, -1]];
       } else if (id === 'triceps_extension') {
         const theta = 2.02 * (1 - e);
         const transverse = (side * .215 * h - shoulder[0]) / (length(root, root + 1) + length(root + 1, root + 2));
         const sagittal = Math.sqrt(Math.max(0, 1 - transverse ** 2));
-        armFK(i, [transverse, sagittal, 0], [transverse, sagittal * Math.cos(theta), -sagittal * Math.sin(theta)], [-side, 0, 0]);
-        data.grip = 'goblet';
+        armFK(i, [transverse, sagittal, 0], [transverse, sagittal * Math.cos(theta), -sagittal * Math.sin(theta)]);
+        // Separate neutral-grip weights follow the forearms. Forcing both
+        // hands inward toward one vertical weight bent each wrist ~94 degrees.
+        data.gripAxes = [[0, -Math.sin(theta), -Math.cos(theta)], [0, Math.sin(theta), Math.cos(theta)]];
       } else if (id === 'dumbbell_shrug') {
         // Scapular elevation rather than a spurious elbow curl or torso lift.
         joints[root][1] += .040 * h * e;
@@ -250,7 +254,8 @@ export function equipmentCatalogPose(id, progress, rest) {
         setArm(i, [side * .16 * h, shoulder[1] - (.09 + .09 * e) * h, shoulder[2] + (.395 - .24 * e) * h], [side * .2, 0, -1], [0, 0, 1]);
         data.pulley = point(0, 1.28, .91);
       } else if (id === 'band_pull_apart') {
-        setArm(i, [side * (.11 + .48 * e) * h, shoulder[1] - .05 * h, shoulder[2] + (.40 - .32 * e) * h], [side, -.2, -.1], [0, 0, 1]);
+        setArm(i, [side * (.11 + .48 * e) * h, shoulder[1] - .05 * h, shoulder[2] + (.40 - .32 * e) * h], [side, -.2, -.1]);
+        data.gripAxes = [[0, 1, 0], [0, -1, 0]];
       } else if (id === 'cable_pushdown') {
         armFK(i, [side * .035, -.97, .16], [0, -Math.cos(1.30 * (1 - e)), Math.sin(1.30 * (1 - e))]);
         data.pulley = point(0, 1.93, .60);
@@ -258,21 +263,66 @@ export function equipmentCatalogPose(id, progress, rest) {
         setArm(i, [side * (.12 + .14 * e) * h, shoulder[1] + .12 * h * e, shoulder[2] + (.40 - .28 * e) * h], [side, .15, -.5], [0, 0, 1]);
         data.pulley = point(0, 1.56, 1.05);
       } else if (id === 'cable_pallof') {
-        setArm(i, [side * .022 * h, shoulder[1] - .125 * h, shoulder[2] + (.16 + .212 * e) * h], [side, -.2, -.1], [0, 0, 1]);
+        setArm(i, [side * .022 * h, shoulder[1] + (-.125 + i * .055) * h, shoulder[2] + (.16 + .212 * e) * h], [side, -.2, -.1]);
         data.pulley = point(-1.0, 1.31, .31);
       }
     }
   }
-  if (!data.gripAxes) data.gripAxes = [[1, 0, 0], [1, 0, 0]];
+  // The back of the hand is gripAxis × hand direction. An overhand grip is the
+  // default: the old underhand default left presses, pulldowns and deadlift-style
+  // holds with palms reversed and the forearm twisted half a turn to compensate.
+  if (!data.gripAxes) data.gripAxes = id === 'curl' ? [[1, 0, 0], [1, 0, 0]] : [[-1, 0, 0], [-1, 0, 0]];
+  // Weights and relaxed hands carried at the sides face the thighs.
+  if (['dumbbell_shrug', 'dumbbell_split_squat', 'dumbbell_row', 'treadmill_walk'].includes(id)) data.gripAxes = [[0, 0, 1], [0, 0, -1]];
   if (id === 'hammer_curl') data.gripAxes[1] = data.gripAxes[0].map(value => -value);
-  if (['machine_chest_press', 'machine_row', 'cable_face_pull', 'goblet_squat', 'triceps_extension'].includes(id)) data.gripAxes = [[0, 1, 0], [0, -1, 0]];
-  if (['stationary_cycle', 'leg_press', 'leg_extension', 'seated_leg_curl', 'machine_hip_abduction'].includes(id)) {
+  if (['machine_chest_press', 'machine_row', 'goblet_squat', 'elliptical', 'cable_pallof'].includes(id)) data.gripAxes = [[0, 1, 0], [0, -1, 0]];
+  if (['leg_press', 'leg_extension', 'seated_leg_curl', 'machine_hip_abduction'].includes(id)) {
     data.gripAxes = [[0, 0, 1], [0, 0, -1]];
     arm.forEach(([, , wrist, finger]) => { joints[finger] = v(joints[wrist]).add(new THREE.Vector3(0, -length(wrist, finger), 0)).toArray(); });
+  }
+  if (id === 'barbell_squat' || id === 'goblet_squat') {
+    // Fit the visible palm anchor to the supported load, not just the wrist.
+    // Neutral wrist edits must not leave a bar at waist height or a goblet
+    // floating between hands that are wider than the dumbbell's upper plate.
+    const torso = v(joints[1]).sub(v(joints[0])).normalize();
+    const front = new THREE.Vector3(0, -torso.z, torso.y);
+    for (let i = 0; i < 2; i++) {
+      const sign = i ? -1 : 1, wrist = i ? 8 : 5;
+      const target = v(joints[1]).addScaledVector(torso, id === 'barbell_squat' ? .04 * h : -.02 * h)
+        .addScaledVector(front, (id === 'barbell_squat' ? -.135 : .32) * h);
+      target.x = sign * (id === 'barbell_squat' ? .37 : .07) * h;
+      const [shoulder,elbow,,finger]=arm[i],forearm=length(elbow,wrist);
+      const palm=.17*h*(rest.handGripScale?.[i]||1),aim=target.clone();
+      for (let iteration = 0; iteration < 16; iteration++) {
+        // Solve to the palm first; moving only the wrist can oscillate when the
+        // closed hand's lever arm is almost as long as the forearm.
+        const [bend,end]=solveLimb(joints[shoulder],aim.toArray(),length(shoulder,elbow),forearm+palm,[sign,-1,id==='barbell_squat'?-.3:.1]);
+        const direction=v(end).sub(v(bend)).normalize();
+        joints[elbow]=bend;joints[wrist]=v(bend).addScaledVector(direction,forearm).toArray();
+        joints[finger]=v(joints[wrist]).addScaledVector(direction,length(wrist,finger)).toArray();
+        const anchor=toolGripAnchor(rest,joints,i,toolHandRotation(rest,joints,i,data.gripAxes[i]));
+        aim.addScaledVector(target.clone().sub(v(anchor)),.8);
+      }
+    }
+  }
+  // Keep load-bearing grips aligned with the forearm throughout the lift.
+  // Fixed world-up/down directions bent pressing and seated wrists >50 degrees.
+  for(const [,elbow,wrist,finger] of arm){
+    joints[finger]=v(joints[wrist]).addScaledVector(v(joints[wrist]).sub(v(joints[elbow])).normalize(),length(wrist,finger)).toArray();
   }
   data.wristAnchors = [joints[5].slice(), joints[8].slice()];
   data.grip = 'closed';
   joints.boneRotations ||= {};
+  if(id==='dumbbell_floor_press'){
+    // Preserve the pelvis-facing thigh surface in a supine pose. A shortest
+    // world-space rotation can turn the gluteal fold through the floor.
+    const frame=new THREE.Quaternion().fromArray(joints.boneRotations[0]);
+    [[9,10],[10,11],[12,13],[13,14]].forEach(([a,b],index)=>{
+      const from=v(rest[b]).sub(v(rest[a])).normalize().applyQuaternion(frame);
+      const to=v(joints[b]).sub(v(joints[a])).normalize();
+      joints.boneRotations[6+index]=new THREE.Quaternion().setFromUnitVectors(from,to).multiply(frame).toArray();
+    });
+  }
   data.handles = arm.map((_, i) => {
     const rotation = toolHandRotation(rest, joints, i, data.gripAxes[i]);
     joints.boneRotations[12 + i] = rotation.toArray();

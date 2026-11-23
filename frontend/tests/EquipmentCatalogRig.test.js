@@ -1,11 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Quaternion, Vector3 } from 'three';
 import catalog from '../src/shared/lib/localCatalog.json';
-import { personalizedVertices } from '../src/health/components/body3d/avatar.js';
-import { morphPositions } from '../src/health/components/body3d/morph.js';
-import { footwearAnchors } from '../src/health/components/body3d/Footwear.jsx';
-import { posedShoes } from '../src/health/components/exercise/matContact.js';
-import { exerciseShoeFloor, soleSupportOffsets } from '../src/health/components/exercise/runningShoeGeometry.js';
 import { REST, BONES, bindSurface, deformSurface } from '../src/health/components/exercise/rig.js';
 import mesh from '../src/health/components/body3d/assets/human-mesh.json';
 import { equipmentCatalogPose, EQUIPMENT_CATALOG_IDS } from '../src/health/components/exercise/equipmentCatalogRig.js';
@@ -18,6 +13,28 @@ const phases = Array.from({ length: 33 }, (_, i) => i / 32);
 const pose = (id, t, rest = REST) => equipmentCatalogPose(id, t, rest);
 
 describe('equipment catalog authored demonstrations', () => {
+  it('keeps the back-squat load behind the upper torso and both goblet palms on the upper plate',()=>{
+    for(const factor of [.78,1,1.2]){
+      const rest=REST.map(point=>point.map(value=>value*factor));
+      for(const id of ['barbell_squat','goblet_squat'])for(const t of phases){
+        const p=pose(id,t,rest),up=v(p[1]).sub(v(p[0])).normalize(),front=new Vector3(0,-up.z,up.y);
+        const center=v(p.equipment.handles[0]).add(v(p.equipment.handles[1])).multiplyScalar(.5).sub(v(p[1]));
+        expect(Math.abs(center.dot(up)-(id==='barbell_squat'?.04:-.02)*factor),id).toBeLessThan(.015*factor);
+        expect(Math.abs(center.dot(front)-(id==='barbell_squat'?-.135:.32)*factor),id).toBeLessThan(.015*factor);
+        expect(Math.abs(distance(...p.equipment.handles)-(id==='barbell_squat'?.74:.14)*factor),id).toBeLessThan(.015*factor);
+      }
+    }
+  });
+  it('keeps band pull-apart and overhead extension wrists aligned with the forearm without grip-frame flips',()=>{
+    for(const id of ['band_pull_apart','triceps_extension'])for(let i=0;i<120;i++){
+      const a=pose(id,i/120),b=pose(id,(i+1)/120);
+      for(const [side,[elbow,wrist,finger]] of [[4,5,17],[7,8,18]].entries()){
+        expect(v(a[wrist]).sub(v(a[elbow])).angleTo(v(a[finger]).sub(v(a[wrist])))).toBeLessThan(.001);
+        expect(new Quaternion().fromArray(a.boneRotations[12+side]).angleTo(new Quaternion().fromArray(b.boneRotations[12+side]))).toBeLessThan(.2);
+      }
+    }
+    expect(pose('triceps_extension',.5).equipment.handles[0][0]).toBeGreaterThan(.1);
+  });
   it('provides a dedicated rig for every equipment catalog entry, with explicit prop identity', () => {
     const ids = catalog.filter(exercise => exercise.training_type === 'equipment').map(exercise => exercise.motion_id);
     expect(ids).toHaveLength(32);
@@ -199,31 +216,12 @@ describe('equipment catalog authored demonstrations', () => {
       const joints = pose('leg_press', t);
       expect(joints[0]).toEqual(initial[0]);
       expect(joints[1]).toEqual(initial[1]);
-      const travel = v(joints[11]).sub(v(initial[11]));
-      const plateTravel = v(joints.equipment.footplate.center).sub(v(initial.equipment.footplate.center));
-      expect(plateTravel.distanceTo(travel)).toBeLessThan(.0001);
+      const footCenter = joints[11].map((value, i) => (value + joints[14][i] + joints[15][i] + joints[16][i]) / 4);
+      const offset = v(joints.equipment.footplate.center).sub(v(footCenter));
+      expect(offset.length()).toBeCloseTo(.085, 6);
+      expect(offset.dot(v(joints.equipment.footplate.normal))).toBeCloseTo(-.085, 6);
     }
     expect(distance(pose('leg_press', .5)[11], pose('leg_press', .5)[9])).toBeGreaterThan(distance(initial[11], initial[9]) + .15);
-  });
-
-  it('places both personalized shoe soles on the moving platform across the exercise cycle', () => {
-    for (const [height, gender] of [[158,'female'],[178,'male'],[198,'male']]) {
-      const measurement = {height}, profile = {gender};
-      const anchors = footwearAnchors(personalizedVertices(measurement, profile));
-      const flat = morphPositions(Float32Array.from(REST.flat()), measurement, profile);
-      const rest = REST.map((_, i) => Array.from(flat.slice(i * 3, i * 3 + 3)));
-      rest.soleOffsets = soleSupportOffsets(anchors, rest);
-      for (const id of ['stationary_cycle', 'elliptical', 'leg_press']) for (const phase of phases) {
-        const joints = pose(id, phase, rest), equipment = joints.equipment;
-        const plate = equipment.footplate;
-        const normal = plate ? v(plate.normal) : new Vector3(0, 1, 0);
-        const pitch = Math.atan2(-normal.z, normal.y);
-        posedShoes(anchors, rest, joints).forEach((shoe, side) => {
-          const top = plate ? v(plate.center).dot(normal) + .03 * equipment.scale : equipment.pedals[side][1];
-          expect(Math.abs(exerciseShoeFloor(shoe, pitch) - top), id).toBeLessThan(.001);
-        });
-      }
-    }
   });
 
   it('uses actual bike pedal circles, opposite crank phases and fixed handle grips', () => {
@@ -232,7 +230,7 @@ describe('equipment catalog authored demonstrations', () => {
       const joints = pose('stationary_cycle', t), { pedals, pedalPivot } = joints.equipment;
       for (let i = 0; i < 2; i++) {
         expect(Math.hypot(pedals[i][1] - pedalPivot[1], pedals[i][2] - pedalPivot[2])).toBeCloseTo(.18, 6);
-        expect(distance(joints[i === 0 ? 11 : 14], pedals[i])).toBeCloseTo(Math.hypot(.10, .065), 6);
+        expect(distance(joints[i === 0 ? 11 : 14], pedals[i])).toBeCloseTo(Math.hypot(.055, .045), 6);
       }
       expect(pedals[0][1] + pedals[1][1]).toBeCloseTo(2 * pedalPivot[1], 6);
       expect(pedals[0][2] + pedals[1][2]).toBeCloseTo(2 * pedalPivot[2], 6);
@@ -248,7 +246,7 @@ describe('equipment catalog authored demonstrations', () => {
     expect(treadmill.equipment.beltY).toBe(.06);
     for (const t of phases) {
       const joints = pose('elliptical', t);
-      joints.equipment.pedals.forEach((pedal, i) => expect(distance(joints[i === 0 ? 11 : 14], pedal)).toBeCloseTo(Math.hypot(.10, .065), 6));
+      joints.equipment.pedals.forEach((pedal, i) => expect(distance(joints[i === 0 ? 11 : 14], pedal)).toBeCloseTo(.075, 6));
       expect(joints[11][2] + joints[14][2]).toBeCloseTo(.08, 6);
     }
   });

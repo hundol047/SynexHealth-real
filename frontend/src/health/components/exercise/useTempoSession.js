@@ -4,10 +4,10 @@ import {buildTempoPlan,tempoFrame} from './tempoSession.js';
 export default function useTempoSession(exercises,{disabled=false}={}){
  const [speed,setSpeed]=useState(1),[restOverrides,setRestOverrides]=useState({});
  const plan=useMemo(()=>buildTempoPlan(exercises,{speed,restOverrides}),[exercises,speed,restOverrides]);
- const [state,setState]=useState({status:'idle',index:0,elapsed:0});
+ const [state,setState]=useState({status:'idle',index:0,elapsed:0,skipped:[],workMs:{}});
  const pause=useCallback(()=>setState(s=>s.status==='running'?{...s,status:'paused'}:s),[]);
  const signature=exercises.map(e=>e.exercise_id||e.motion_id).join('|');
- useEffect(()=>{setState({status:'idle',index:0,elapsed:0});setRestOverrides({});},[signature]);
+ useEffect(()=>{setState({status:'idle',index:0,elapsed:0,skipped:[],workMs:{}});setRestOverrides({});},[signature]);
  useEffect(()=>{if(disabled)pause();},[disabled,pause]);
  useEffect(()=>{const hide=()=>{if(document.hidden)pause();};document.addEventListener('visibilitychange',hide);return()=>document.removeEventListener('visibilitychange',hide);},[pause]);
  useEffect(()=>{
@@ -19,22 +19,25 @@ export default function useTempoSession(exercises,{disabled=false}={}){
    if(document.hidden||delta>1500){pause();return;}
    setState(s=>{
     if(s.status!=='running')return s;
-    // Keep the fraction of a tick that belongs to the next segment.
-    let index=s.index, elapsed=s.elapsed+Math.max(0,delta);
-    while(index<plan.length && elapsed>=plan[index].durationMs){
-     elapsed-=plan[index].durationMs;
-     index++;
+    const segment=plan[s.index];if(!segment)return {...s,status:'complete'};
+    // Carry the part of a tick that belongs to the next segment, so zero-rest plans keep time.
+    let index=s.index,elapsed=s.elapsed+Math.max(0,delta),workMs=s.workMs;
+    while(index<plan.length&&elapsed>=plan[index].durationMs){
+     if(plan[index].kind==='work')workMs={...workMs,[plan[index].exerciseIndex]:(workMs[plan[index].exerciseIndex]||0)+plan[index].durationMs-(index===s.index?s.elapsed:0)};
+     elapsed-=plan[index].durationMs;index++;
     }
-    return index===plan.length ? {status:'complete',index,elapsed:0} : {...s,index,elapsed};
+    if(index<plan.length&&plan[index].kind==='work'){const before=index===s.index?s.elapsed:0;workMs={...workMs,[plan[index].exerciseIndex]:(workMs[plan[index].exerciseIndex]||0)+elapsed-before};}
+    return index>=plan.length?{...s,workMs,status:'complete',index:plan.length,elapsed:0}:{...s,workMs,index,elapsed};
    });
   },1000/24);
   return()=>clearInterval(timer);
  },[state.status,disabled,plan,pause]);
  const segment=plan[state.index],frame=tempoFrame(segment,state.elapsed);
- function start(){if(disabled||document.hidden||!plan.length)return;setState(s=>s.status==='running'?s:s.status==='paused'?{...s,status:'running'}:{status:'running',index:0,elapsed:0});}
- function restChange(index,seconds){setRestOverrides(old=>({...old,[index]:exercises[index]?.coachRestSeconds!=null?Math.max(0,Math.min(300,seconds)):Math.max(10,Math.min(120,seconds))}));}
+  function start(){if(disabled||document.hidden||!plan.length)return;setState(s=>s.status==='running'?s:s.status==='paused'||s.status==='idle'?{...s,status:'running'}:{status:'running',index:0,elapsed:0,skipped:[],workMs:{}});}
+  function restChange(index,seconds){setRestOverrides(old=>({...old,[index]:exercises[index]?.coachRestSeconds!=null?Math.max(0,Math.min(300,seconds)):Math.max(10,Math.min(120,seconds))}));}
  return {state,segment,frame,plan,speed,setSpeed,pause,start,restChange,restOverrides,
-  reset:()=>setState({status:'idle',index:0,elapsed:0}),
-  skipRest:()=>setState(s=>plan[s.index]?.kind==='rest'?{status:s.index+1>=plan.length?'complete':s.status,index:s.index+1,elapsed:0}:s),
+  reset:()=>setState({status:'idle',index:0,elapsed:0,skipped:[],workMs:{}}),
+  skipExercise:()=>setState(s=>{const current=plan[s.index];if(disabled||!current||s.status==='complete')return s;const next=plan.findIndex(p=>p.exerciseIndex>current.exerciseIndex);return {...s,status:next<0?'complete':s.status,index:next<0?plan.length:next,elapsed:0,skipped:[...new Set([...s.skipped,current.exerciseIndex])]};}),
+  skipRest:()=>setState(s=>plan[s.index]?.kind==='rest'?{...s,status:s.index+1>=plan.length?'complete':s.status,index:s.index+1,elapsed:0}:s),
   playback:state.status==='idle'?null:{progress:frame.progress,running:state.status==='running'&&segment?.kind==='work',kind:segment?.kind||'complete',remaining:frame.remaining,rep:frame.rep,side:frame.side}};
 }

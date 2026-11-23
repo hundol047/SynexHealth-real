@@ -5,7 +5,7 @@ import { FLOOR_CATALOG_IDS, floorCatalogPose } from '../src/health/components/ex
 import { BONES, REST, bindSurface, deformSurface } from '../src/health/components/exercise/rig.js';
 import { morphPositions } from '../src/health/components/body3d/morph.js';
 import { footwearAnchors } from '../src/health/components/body3d/Footwear.jsx';
-import { exerciseShoeFloor, heelContactTargets } from '../src/health/components/exercise/runningShoeGeometry.js';
+import { exerciseShoeFloor } from '../src/health/components/exercise/ExerciseMotion3D.jsx';
 
 const v = point => new Vector3(...point);
 const angle = (a, b, c) => v(a).sub(v(b)).angleTo(v(c).sub(v(b))) * 180 / Math.PI;
@@ -103,20 +103,43 @@ describe('anatomical floor catalog demonstrations', () => {
     }
   });
 
-  it('lands each athlete’s heel on the mat at full extension', () => {
-    for (const [height, gender] of [[158, 'female'], [178, 'male'], [198, 'male']]) {
-      const neutral = Float32Array.from(mesh.profiles[gender], value => value * mesh.scale);
-      const body = morphPositions(neutral, { height }, { gender });
-      const restPositions = morphPositions(Float32Array.from(REST.flat()), { height }, { gender });
-      const rest = REST.map((_, index) => Array.from(restPositions.slice(index * 3, index * 3 + 3)));
-      const shoes = footwearAnchors(body);
-      rest.heelContactY = heelContactTargets(shoes, rest);
-      for (const [side, phase] of [[0, .25], [1, .75]]) {
-        const joints = floorCatalogPose('dead_bug', phase, rest), ankle = side === 0 ? 11 : 14;
-        const rotation = new Quaternion().fromArray(joints.boneRotations[side + 10]);
-        const center = v(shoes[side].center).sub(v(rest[ankle])).applyQuaternion(rotation).add(v(joints[ankle])).toArray();
-        expect(exerciseShoeFloor({ ...shoes[side], center, rotation })).toBeCloseTo(.003, 4);
+  it('keeps the gluteal surface on the heel side of each raised thigh in a supine heel touch', () => {
+    for (const gender of ['male','female']) {
+      const skin=Float32Array.from(mesh.profiles[gender],value=>value*mesh.scale),binding=bindSurface(skin);
+      for (const phase of [0,.25,.5,.75]) {
+        const pose=floorCatalogPose('dead_bug',phase,REST),positions=deformSurface(skin,binding,pose,new Float32Array(skin.length),REST,false);
+        for (const [side,ankle] of [[1,11],[-1,14]]) {
+          if (pose[ankle][1]<.5) continue; // Check the leg held in tabletop.
+          const posterior=[];
+          for (let i=0;i<binding.length;i++) if(skin[i*3]*side>.05&&skin[i*3]*side<.17&&skin[i*3+1]>.84&&skin[i*3+1]<.94&&skin[i*3+2]<-.03) posterior.push(v(positions.slice(i*3,i*3+3)));
+          expect(posterior.length).toBeGreaterThan(10);
+          const center=posterior.reduce((sum,p)=>sum.add(p),new Vector3()).divideScalar(posterior.length);
+          // A world-space half turn inverted this surface toward the head,
+          // leaving a hollow side silhouette even though every joint was valid.
+          expect(center.z-pose[0][2],`${gender} glute ${side} at ${phase}`).toBeGreaterThan(.05);
+          expect(Math.min(...posterior.map(p=>p.y))).toBeGreaterThan(.015);
+        }
       }
+    }
+  });
+
+  it('lands the actual rounded shoe heel at the mat instead of leaving a hovering ankle target', () => {
+    const standard = Float32Array.from(mesh.profiles.male, (value, index) => (value + mesh.profiles.female[index]) * mesh.scale / 2);
+    const shoes = footwearAnchors(standard);
+    for (const [side, phase] of [[0, .25], [1, .75]]) {
+      const joints = floorCatalogPose('dead_bug', phase, REST), ankle = side === 0 ? 11 : 14;
+      const rotation = new Quaternion().fromArray(joints.boneRotations[side + 10]);
+      const center = v(shoes[side].center).sub(v(REST[ankle])).applyQuaternion(rotation).add(v(joints[ankle])).toArray();
+      const actualFloor = exerciseShoeFloor({ ...shoes[side], center, rotation });
+      expect(actualFloor).toBeGreaterThan(0);
+      expect(actualFloor).toBeLessThan(.006);
+    }
+  });
+
+  it('keeps quadruped support arms nearly straight instead of dropping elbows toward the mat', () => {
+    for(const id of ['cat_cow','bird_dog']){
+      const joints=floorCatalogPose(id,0,REST);
+      for(const [a,b,c] of [[3,4,5],[6,7,8]])expect(angle(joints[a],joints[b],joints[c]),id).toBeGreaterThan(160);
     }
   });
 
@@ -152,7 +175,7 @@ describe('anatomical floor catalog demonstrations', () => {
     expect(joints[8][0] - joints[7][0]).toBeGreaterThan(.20);
     expect(angle(joints[6], joints[7], joints[8])).toBeGreaterThan(85);
     expect(angle(joints[6], joints[7], joints[8])).toBeLessThan(100);
-    expect(joints[13][1]).toBeCloseTo(.062, 6);
+    expect(joints[13][1]).toBeCloseTo(.082, 6);
     expect(joints[10][1] - joints[13][1]).toBeCloseTo(.075, 6);
     const bodyFront = new Vector3(0, 0, 1).applyQuaternion(new Quaternion().fromArray(joints.boneRotations[0]));
     expect(bodyFront.x).toBeGreaterThan(.99);

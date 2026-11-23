@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useMemo, useCallback, useRef, useState } from 'react';
 import { Play, Pause, RotateCcw, FlipHorizontal2, Repeat2, Check, ChevronDown } from 'lucide-react';
 import { MOTIONS } from './motions.js';
 import { getMotionGuide, motionPhase } from './motionGuide.js';
@@ -6,43 +6,68 @@ import { useExerciseDisplay, toggleExerciseDisplay, reportUnavailableRenderer } 
 import MotionFigure from './MotionFigure.jsx';
 import './exercise-experience.css';
 import useTempoSession from './useTempoSession.js';
+import WorkoutResults from './WorkoutResults.jsx';
 import TempoControls from './TempoControls.jsx';
 
 const ExerciseMotion3D = lazy(() => import('./ExerciseMotion3D.jsx'));
 
-export default function ExerciseMotion({ exercise, measurement, profile, paused=false, onReady, transportHost, playback:externalPlayback }) {
+export default function ExerciseMotion({ exercise, measurement, profile, autoPlay=false, paused=false, onReady, standaloneSession=true, transportHost, playback:externalPlayback }) {
   const tempoExercises=useMemo(()=>[exercise],[exercise]);
   const tempo=useTempoSession(tempoExercises,{disabled:paused||externalPlayback!==undefined});
   const playback=externalPlayback!==undefined?externalPlayback:tempo.playback;
   const motion = MOTIONS[exercise.motion_id], guide = getMotionGuide(exercise.motion_id);
+  // The member's 2D/3D choice is remembered; 'fallback' means this device could not start 3D.
   const dimension = useExerciseDisplay();
+  const [readyScene,setReadyScene] = useState(null);
+  const sceneReady=readyScene===exercise.motion_id && dimension==='3d';
+  const markSceneReady=useCallback(()=>setReadyScene(exercise.motion_id),[exercise.motion_id]);
+  useEffect(()=>{if(dimension!=='3d')setReadyScene(null);},[dimension]);
   const [loop, setLoop] = useState(true);
-  const [playing, setPlaying] = useState(false);
+  const [playing, setPlaying] = useState(autoPlay && !paused && !playback);
   const [speed, setSpeed] = useState(1);
   const [localProgress, setProgress] = useState(0);
   const progress=playback?.progress??localProgress;
   const [mirror, setMirror] = useState(false);
-  const phase = useRef(0), viewer = useRef(null);
+  const phase = useRef(0), viewer = useRef(null), visibilityObserver=useRef(null), visibilityTimer=useRef();
+  const attachViewer=useCallback(node=>{
+    clearTimeout(visibilityTimer.current);visibilityObserver.current?.disconnect();viewer.current=node;
+    if(node)visibilityObserver.current?.observe(node);
+  },[]);
+  const currentPhase = motionPhase(exercise.motion_id, progress);
+  useEffect(() => { setPlaying(autoPlay && !paused && !playback); phase.current = 0; setProgress(0); }, [exercise.motion_id, autoPlay]);
+  useEffect(() => { if(sceneReady || dimension!=='3d') onReady?.(); }, [exercise.motion_id, onReady,sceneReady,dimension]);
   const stageMessage = {
     prepare: ['시작 자세 준비', '카운트가 끝나면 시범에 맞춰 시작하세요.'],
     rest: ['세트 후 휴식', '편한 자세로 호흡을 정리하세요.'],
     complete: ['시범 완료', '수행한 세트를 운동 화면에서 기록하세요.'],
   }[playback?.kind];
-  const currentPhase = motionPhase(exercise.motion_id, progress);
-  useEffect(() => { setPlaying(false); phase.current = 0; setProgress(0); }, [exercise.motion_id]);
-  useEffect(() => { onReady?.(); }, [exercise.motion_id, onReady]);
   useEffect(() => { if (paused) setPlaying(false); }, [paused]);
   useEffect(() => { if (playback) setPlaying(false); }, [!!playback]);
   useEffect(() => {
+    if(!sceneReady && dimension==='3d') return;
     const media = window.matchMedia?.('(prefers-reduced-motion: reduce)');
     const pause = () => setPlaying(false);
-    const observer = typeof IntersectionObserver === 'undefined' ? null : new IntersectionObserver(([entry]) => { if (!entry.isIntersecting) pause(); }, { threshold: .05 });
+    let seen = false;
+    const observer = typeof IntersectionObserver === 'undefined' ? null : new IntersectionObserver(([entry]) => {
+      if(entry.target!==viewer.current)return;
+      clearTimeout(visibilityTimer.current);
+      if(entry.isIntersecting){seen=true;return;}
+      if(seen)visibilityTimer.current=setTimeout(()=>{
+        if(entry.target!==viewer.current)return;
+        const current=viewer.current.getBoundingClientRect();
+        // Suspense can deliver a zero-size observation while a texture loads.
+        // If layout has returned, request a fresh observation before pausing.
+        if(!entry.boundingClientRect.width&&current.width&&current.height){observer.unobserve(viewer.current);observer.observe(viewer.current);return;}
+        pause();
+      },350);
+    }, { threshold: .05 });
+    visibilityObserver.current=observer;
     if (viewer.current) observer?.observe(viewer.current);
     media?.addEventListener?.('change', pause);
-    return () => { observer?.disconnect(); media?.removeEventListener?.('change', pause); };
-  }, [exercise.motion_id]);
+    return () => { clearTimeout(visibilityTimer.current); observer?.disconnect();if(visibilityObserver.current===observer)visibilityObserver.current=null; media?.removeEventListener?.('change', pause); };
+  }, [exercise.motion_id,sceneReady,dimension]);
   useEffect(() => {
-    if (playback || !playing || !motion) return;
+    if (playback || !playing || !motion || (dimension==='3d'&&!sceneReady)) return;
     if (document.hidden) { setPlaying(false); return; }
     let frame, last, renderedAt = 0;
     const duration = guide?.durationMs || 7000;
@@ -61,7 +86,8 @@ export default function ExerciseMotion({ exercise, measurement, profile, paused=
     const hide = () => { if (document.hidden) setPlaying(false); };
     document.addEventListener('visibilitychange', hide);
     return () => { cancelAnimationFrame(frame); document.removeEventListener('visibilitychange', hide); };
-  }, [playing, speed, motion, loop, guide?.durationMs, !!playback]);
+  }, [playing, speed, motion, loop, guide?.durationMs, !!playback, dimension, sceneReady]);
+  if(standaloneSession&&externalPlayback===undefined&&tempo.state.status==='complete')return <div className="exercise-motion-results"><TempoControls session={tempo} exercises={tempoExercises} disabled={paused}/><WorkoutResults exercises={tempoExercises} measurement={measurement} skipped={tempo.state.skipped} workMs={tempo.state.workMs}/></div>;
   if (!motion) return <p className="muted">이전 버전 운동입니다. 루틴을 다시 생성하면 동작 안내를 볼 수 있습니다.</p>;
   const setPhase = value => { setPlaying(false); phase.current = value; setProgress(value); };
   const playPause = () => { if (!playing && phase.current >= 1) { phase.current = 0; setProgress(0); } setPlaying(p => !p); };
@@ -70,9 +96,10 @@ export default function ExerciseMotion({ exercise, measurement, profile, paused=
     setPhase(cycle + step.start / (guide?.kind === 'alternating' ? 2 : 1));
   };
   return <div className="motion-layout exercise-motion-experience">
-    <div className="motion-viewer" ref={viewer}>
+    <div className="motion-viewer" ref={attachViewer}>
       <div className="motion-studio-heading"><div><span className="motion-studio-kicker">동작 가이드</span><strong>{dimension === '3d' ? '3D 동작 시범' : '2D 동작 시범'}</strong></div><span className="motion-studio-status"><i className={(playback?playback.running:playing) ? 'is-playing' : ''}/>{(playback?playback.running:playing) ? '재생 중' : '정지 화면'}</span></div>
-      {dimension === '3d' ? <Suspense fallback={<p role="status">운동 시범을 준비하고 있어요…</p>}><ExerciseMotion3D motion={exercise.motion_id} progress={progress} mirror={mirror} measurement={measurement} profile={profile} defaultView={guide?.defaultView} onFallback={reportUnavailableRenderer}/></Suspense> : <MotionFigure exercise={exercise} progress={progress} mirror={mirror}/>}
+      {dimension==='3d'&&!sceneReady&&<p className="motion-loading" role="status">운동 시범을 준비하고 있습니다. 준비되면 처음 자세부터 시작합니다.</p>}
+      {dimension === '3d' ? <Suspense fallback={null}><ExerciseMotion3D onReady={markSceneReady} motion={exercise.motion_id} progress={progress} mirror={mirror} measurement={measurement} profile={profile} defaultView={guide?.defaultView} onFallback={reportUnavailableRenderer}/></Suspense> : <MotionFigure exercise={exercise} progress={progress} mirror={mirror}/>}
       {!playback&&<div className="motion-playback-controls">
         <button className="btn btn-primary" type="button" disabled={paused} onClick={playPause}>{playing ? <Pause size={17} fill="currentColor"/> : <Play size={17} fill="currentColor"/>}{playing ? '일시정지' : '동작 재생'}</button>
         <button className="motion-icon-control" aria-label="처음 자세로" title="처음 자세로" type="button" onClick={() => setPhase(0)}><RotateCcw size={18}/></button>
@@ -84,7 +111,7 @@ export default function ExerciseMotion({ exercise, measurement, profile, paused=
       {!stageMessage && !!guide?.phases.length && <div className="motion-phase-steps" role="group" aria-label="동작 순서">{guide.phases.map((step, index) => <button type="button" disabled={!!playback} key={index} aria-label={`${step.label} 구간 보기`} aria-current={currentPhase?.index === index ? 'step' : undefined} onClick={() => selectStep(step)}><span>{index + 1}</span>{step.label}</button>)}</div>}
       {!playback&&<><div className="motion-scrubber"><input aria-label="동작 구간" aria-valuetext={`${Math.round(progress * 100)}% · ${currentPhase?.label || motion.label}`} type="range" min="0" max="100" value={Math.round(progress * 100)} style={{ '--motion-progress': `${Math.round(progress * 100)}%` }} onChange={e => setPhase(Number(e.target.value) / 100)}/><div><span>시작 자세</span><span>{Math.round(progress * 100)}%</span><span>한 주기</span></div></div>
       <details className="motion-extra-controls"><summary>재생 설정<ChevronDown size={14}/></summary><div><label><input type="checkbox" checked={loop} onChange={e => setLoop(e.target.checked)}/><Repeat2 size={16}/> 반복 재생</label><button type="button" onClick={toggleExerciseDisplay}>{dimension === '3d' ? '2D 안내 보기' : dimension === 'fallback' ? '3D 다시 시도' : '3D 안내 보기'}</button></div></details></>}
-      {externalPlayback===undefined&&<TempoControls session={tempo} exercises={tempoExercises} disabled={paused} transportHost={transportHost}/>}
+      {externalPlayback===undefined&&<TempoControls showSkip={standaloneSession} session={tempo} exercises={tempoExercises} disabled={paused} transportHost={transportHost}/>}
     </div>
     <div className="motion-instructions">
       <div className="motion-instruction-heading"><span>01</span><h4>준비부터 마무리까지</h4></div><p className="motion-instruction-intro">시작 자세를 확인한 뒤, 0.5× 속도로 지지점과 움직임을 살펴보세요.</p>

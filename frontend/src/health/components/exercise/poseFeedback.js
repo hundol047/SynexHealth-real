@@ -1,5 +1,6 @@
 import {getBodyweightGuide} from './bodyweightGuide.js';
 import {RULE_THRESHOLDS as T} from './poseThresholds.js';
+import {getCoachingProfile} from './coachingCatalog.js';
 
 // Technique cues describe intended effort, never muscle activation inferred from pixels.
 const effort={
@@ -11,10 +12,11 @@ const effort={
  hip_hinge:{target:'엉덩이·허벅지 뒤쪽',load:'엉덩이를 뒤로 보낼 때 허벅지 뒤쪽이 길어지는 느낌을 찾으세요. 돌아올 때 발 전체를 누르며 엉덩이로 고관절을 펴세요.',avoid:'허리를 둥글게 말거나 마지막에 허리를 뒤로 젖히지 마세요.'},
  glute_bridge:{target:'엉덩이·허벅지 뒤쪽',load:'발바닥을 누르고 엉덩이를 조여 골반을 올리세요. 어깨와 발로 지지하며 내려올 때도 엉덩이의 긴장을 천천히 풀어 주세요.',avoid:'허리를 꺾어 높이를 늘리지 마세요. 허벅지 뒤가 경련하면 내려놓고 발 위치를 조정하세요.'},
 };
-const phaseText={start:'시작 자세',standing:'시작 자세',eccentric:'천천히 내려가는 구간',concentric:'힘을 써서 돌아오는 구간',bottom:'방향을 바꾸는 구간',completion:'반복 마무리',holding:'유지 구간',unknown:'관찰 대기'};
+const phaseText={ready:'시작 자세 확인',outward:'동작 진행 구간',endpoint:'방향을 바꾸는 구간',returning:'시작 위치로 돌아오는 구간',adjust:'정렬 확인',start:'시작 자세',standing:'시작 자세',eccentric:'천천히 내려가는 구간',concentric:'힘을 써서 돌아오는 구간',bottom:'방향을 바꾸는 구간',completion:'반복 마무리',holding:'유지 구간',unknown:'관찰 대기'};
 const round=value=>Number.isFinite(value)?Math.round(value):null;
 const pair=(values,label,reference)=>Array.isArray(values)&&values.length===2&&values.every(Number.isFinite)?{label,value:`왼쪽 ${round(values[0])}° · 오른쪽 ${round(values[1])}°`,reference}:null;
 function evidence(issue){
+ if(issue.evidence)return issue.evidence;
  const v=issue.value;if(!Number.isFinite(v))return null;
  if(issue.metric==='hip_height')return `어깨–발목 선에서 골반이 ${v>0?'아래':'위'}로 몸통 길이의 약 ${round(Math.abs(v)*100)}% 벗어남 · 비교: 선에 가깝게 유지`;
  if(issue.metric==='knee_tracking_ratio')return `무릎 간격/발목 간격 ${v.toFixed(2)} · 안쪽 모임 관찰 기준 ${T.kneeTrackingRatio} 미만`;
@@ -26,10 +28,10 @@ function evidence(issue){
  return null;
 }
 export function poseFeedback(id,result){
- const guide=getBodyweightGuide(id),muscle=effort[id]||{target:guide?.target,load:guide?.cues?.[0],avoid:guide?.cues?.[1]};
+ const profile=getCoachingProfile(id),guide=getBodyweightGuide(id)||profile,muscle=effort[id]||profile?.effort||{target:guide?.target,load:guide?.cues?.[0],avoid:guide?.cues?.[1]};
  if(!result?.detected)return {message:result?.feedback||'전신과 지지점이 보이도록 위치를 잡아 주세요.',observations:[],differences:[],muscle,phase:null};
  const m=result.metrics||{},view=m.camera_view,phase=phaseText[result.movement_phase]||'동작 관찰 중';
- const observations=[];
+ const observations=[...(result.observations||[])];
  const add=x=>{if(x)observations.push(x);};
  if(['squat','lunge','side_lunge','hip_hinge'].includes(id)){
   add(pair(m.knee_flexion,'무릎 각도',id==='hip_hinge'?'무릎은 가볍게 굽히고 고관절로 접기':'내려갈 때 작아지고, 돌아올 때 커지는지 확인'));
@@ -41,6 +43,10 @@ export function poseFeedback(id,result){
   add(pair(m.hip_extension,'어깨–골반–무릎 각도','위쪽에서 길게 정렬하되 허리를 꺾지 않기'));
   add(pair(m.knee_angle,'무릎 각도','발을 너무 멀리 두지 않고 발바닥으로 지지'));
  }
+ if(['curl','shoulder_press','lateral_raise','front_raise'].includes(id)){
+  add(pair(m.elbow_flexion,'팔꿈치 각도',profile?.steps?.[1]||'팔꿈치를 편안한 범위에서 움직이세요.'));
+  add(pair(m.arm_elevation,'위팔과 몸통 사이 각도','반동을 줄이고 몸통을 고정하세요.'));
+ }
  const differences=(result.issues||[]).map(issue=>({...issue,evidence:evidence(issue),action:issue.message}));
  const primary=differences[0];
  let message=primary?.message;
@@ -50,19 +56,32 @@ export function poseFeedback(id,result){
  }
  const sideOnly=['push_up','plank','hip_hinge','glute_bridge'].includes(id),limited=sideOnly&&view!=='side'||id==='side_lunge'&&view!=='front'||view==='oblique';
  const viewNote=limited?'현재 촬영 방향에서는 일부 정렬을 판정할 수 없습니다. 권장 방향으로 옮겨 주세요.':id==='squat'&&view==='side'?'측면에서는 무릎이 안으로 모이는지 판정하지 않습니다.':'화면에서 보이는 관절만 비교합니다. 교정 표시가 없다고 모든 자세가 정확하다는 뜻은 아닙니다.';
- return {message,observations,differences,muscle,phase,viewNote,view,limited,breathing:id==='plank'?'짧고 편안하게 계속 호흡하세요.':result.movement_phase==='concentric'?'힘을 쓰는 동안 천천히 숨을 내쉬세요.':'힘을 풀어 돌아가는 동안 편안하게 숨을 들이쉬세요.'};
+ return {message,observations,differences,muscle,phase,viewNote:profile?`${viewNote} ${profile.limitation}`:viewNote,view,limited,breathing:'힘을 쓰는 동안 천천히 숨을 내쉬고, 숨을 참지 마세요.'};
 }
 
 // Retains only bounded numeric aggregates and observed issue text, never frames or landmarks.
 export class PoseSessionReport{
- constructor(){this.frames=0;this.valid=0;this.last=null;this.validMs=0;this.issues=new Map();this.metrics=new Map();this.baseReps=null;this.reps=0;this.previousIssues=new Set();}
+ constructor(motionId=null){this.motionId=motionId;this.profile=getCoachingProfile(motionId);this.observations=new Map();this.frames=0;this.valid=0;this.last=null;this.validMs=0;this.issues=new Map();this.metrics=new Map();this.baseReps=null;this.reps=0;this.previousIssues=new Set();this.countSupported=true;this.repSeconds=[];this.repRanges=[];this.repMin=Infinity;this.repMax=-Infinity;this.balance=[];}
  add(result,time){
   if(!Number.isFinite(time))return;
+  if(result.count_supported===false)this.countSupported=false;
   const gap=this.last==null?0:time-this.last;
   const delta=gap>0&&gap<=1200?gap:0;this.last=time;this.frames++;
   if(!result.detected){this.wasValid=false;this.previousIssues.clear();return;}
+  for(const observation of result.coaching?.observations||result.observations||[]){if(observation.label&&this.observations.size<16)this.observations.set(observation.label,{label:observation.label,value:observation.value,reference:observation.reference});}
   this.valid++;if(this.wasValid)this.validMs+=delta;this.wasValid=true;
-  this.baseReps??=result.reps||0;this.reps=Math.max(this.reps,(result.reps||0)-this.baseReps);
+  this.baseReps??=result.reps||0;
+  // Per-repetition numbers for the summary: how long each took and how far the joint travelled.
+  if(Number.isFinite(result.angle)){this.repMin=Math.min(this.repMin,result.angle);this.repMax=Math.max(this.repMax,result.angle);}
+  const counted=(result.reps||0)-this.baseReps;
+  if(counted>this.reps){
+   if(Number.isFinite(result.rep_seconds)&&result.rep_seconds>0&&this.repSeconds.length<200)this.repSeconds.push(result.rep_seconds);
+   if(Number.isFinite(this.repMin)&&this.repMax>this.repMin&&this.repRanges.length<200)this.repRanges.push(this.repMax-this.repMin);
+   this.repMin=Infinity;this.repMax=-Infinity;
+  }
+  // Left/right angle difference only means something when the camera faces the person.
+  if(Number.isFinite(result.left_right_balance)&&result.metrics?.camera_view==='front'&&this.balance.length<2000)this.balance.push(result.left_right_balance);
+  this.reps=Math.max(this.reps,counted);
   for(const issue of result.issues||[]){
    if(issue.severity==='camera')continue;
    const old=this.issues.get(issue.id)||{id:issue.id,bodyPart:issue.bodyPart,message:issue.message,samples:0,observedMs:0};
@@ -75,5 +94,28 @@ export class PoseSessionReport{
    this.metrics.set(key,{min:Math.min(old.min,...values),max:Math.max(old.max,...values)});
   }
  }
- snapshot(){return {frames:this.frames,validFrames:this.valid,observedSeconds:Math.round(this.validMs/100)/10,reps:this.reps,issues:[...this.issues.values()].sort((a,b)=>b.samples-a.samples).slice(0,5),ranges:Object.fromEntries(this.metrics),sufficient:this.valid>=5&&this.validMs>=1000};}
+ // Plain statements of what was measured in this clip. "good" lines say what held steady,
+ // "check" lines say what varied; neither is a judgement of correct form.
+ summary(){
+  const lines=[],mean=v=>v.reduce((a,b)=>a+b,0)/v.length,one=v=>Math.round(v*10)/10;
+  if(this.frames>=10&&this.valid/this.frames<.6)lines.push({tone:'check',text:`분석할 수 있었던 구간이 전체의 ${Math.round(this.valid/this.frames*100)}%였어요. 전신이 계속 보이게 카메라를 고정하면 더 많이 확인할 수 있어요.`});
+  if(this.repSeconds.length>=3){
+   const average=mean(this.repSeconds),fastest=Math.min(...this.repSeconds),slowest=Math.max(...this.repSeconds);
+   if((slowest-fastest)/average<=.25)lines.push({tone:'good',text:`반복 속도가 일정했어요 · 한 번에 평균 ${one(average)}초`});
+   else lines.push({tone:'check',text:`반복 속도 차이가 컸어요 · 가장 빠를 때 ${one(fastest)}초, 가장 느릴 때 ${one(slowest)}초`});
+   if(average<1.5)lines.push({tone:'check',text:`한 번에 평균 ${one(average)}초로 빠른 편이에요. 반동 없이 조절되는지 확인해 보세요.`});
+  }
+  if(this.repRanges.length>=4){
+   const half=Math.floor(this.repRanges.length/2),early=mean(this.repRanges.slice(0,half)),late=mean(this.repRanges.slice(-half));
+   if(late<early*.85)lines.push({tone:'check',text:`뒤로 갈수록 움직임 범위가 줄었어요 · 처음 ${Math.round(early)}° → 나중 ${Math.round(late)}°`});
+   else lines.push({tone:'good',text:`움직임 범위가 끝까지 유지됐어요 · 평균 ${Math.round(mean(this.repRanges))}°`});
+  }
+  if(this.balance.length>=10){
+   const average=mean(this.balance);
+   if(average<=10)lines.push({tone:'good',text:`좌우 관절 각도 차이가 작았어요 · 평균 ${Math.round(average)}°`});
+   else if(average>20)lines.push({tone:'check',text:`좌우 관절 각도 차이가 평균 ${Math.round(average)}°였어요. 카메라가 정면을 향했는지 먼저 확인해 보세요.`});
+  }
+  return lines.slice(0,4);
+ }
+ snapshot(){return {motionId:this.motionId,exerciseName:this.profile?.label,observations:[...this.observations.values()],countSupported:this.countSupported,frames:this.frames,validFrames:this.valid,observedSeconds:Math.round(this.validMs/100)/10,reps:this.reps,issues:[...this.issues.values()].sort((a,b)=>b.samples-a.samples).slice(0,5),ranges:Object.fromEntries(this.metrics),sufficient:this.valid>=5&&this.validMs>=1000,summary:this.valid>=5&&this.validMs>=1000?this.summary():[]};}
 }

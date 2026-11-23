@@ -3,12 +3,14 @@ import MotionFigure from './MotionFigure.jsx';
 import { useExerciseDisplay, toggleExerciseDisplay, reportUnavailableRenderer } from './exerciseDisplay.js';
 import { Pause, Play } from 'lucide-react';
 import { getBodyweightGuide, getBodyweightDemoPhase } from './bodyweightGuide.js';
+import {getCoachingProfile} from './coachingCatalog.js';
+import {motionPhase} from './motionGuide.js';
 
 const ExerciseMotion3D = lazy(() => import('./ExerciseMotion3D.jsx'));
 
 export default function BodyweightDemo({ exerciseId, compact = true, paused = false, measurement, profile, playback }) {
   const display = useExerciseDisplay();
-  const guide = getBodyweightGuide(exerciseId);
+  const guide = getBodyweightGuide(exerciseId)||getCoachingProfile(exerciseId);
   const reducedMotion = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const [playing, setPlaying] = useState(!reducedMotion);
   const [visible, setVisible] = useState(!document.hidden);
@@ -44,7 +46,7 @@ export default function BodyweightDemo({ exerciseId, compact = true, paused = fa
     return () => cancelAnimationFrame(frame);
   }, [guide, exerciseId, playing, paused, speed, visible, !!playback]);
   if (!guide) return <p role="status">이 운동의 시범을 준비하고 있습니다.</p>;
-  const phase = getBodyweightDemoPhase(exerciseId, progress);
+  const phase = getBodyweightDemoPhase(exerciseId, progress)||motionPhase(guide.motionId,progress);
   return <div className={`bodyweight-demo coach-demo${guide.floor?' bodyweight-demo-floor':''}`} data-tempo-progress={playback?progress.toFixed(4):undefined}>
     <div className="bodyweight-demo-stage">
       {!playback&&<div className="bodyweight-demo-controls motion-controls">

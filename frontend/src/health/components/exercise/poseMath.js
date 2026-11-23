@@ -5,7 +5,10 @@ export const smoothStep = (start,end,value) => {
   const t = THREE.MathUtils.clamp((value-start)/(end-start),0,1);
   return t*t*t*(t*(t*6-15)+10);
 };
-export const repetition = t => smoothStep(.08,.43,t)*(1-smoothStep(.57,.94,t));
+// Continuous controlled repetitions: ease into and out of each half without
+// the old 14%-cycle frozen turnaround. Timed isometric holds are managed by
+// the workout player, not by inserting a stop into every moving repetition.
+export const repetition = t => smoothStep(0,.5,t)*(1-smoothStep(.5,1,t));
 export const scaleFor = rest => rest[0][1]/.94;
 export const segmentLength = (rest,a,b) => vector(rest[a]).distanceTo(vector(rest[b]));
 export function orientation(up,front=[0,0,1]) {
@@ -23,19 +26,24 @@ export function makeFrame(rest,hip=rest[0],up=[0,1,0],front=[0,0,1],pelvisFront=
   joints.boneRotations={0:rotation.toArray(),1:rotation.toArray()};
   return joints;
 }
-export function solveTwoBone(origin,target,upper,lower,pole) {
+// `soft` eases the limb toward full extension instead of clamping at it. The middle joint's
+// offset is a square root of the remaining slack, so a hard clamp makes the knee or elbow
+// snap straight in a single frame; easing the last 2 % of reach keeps its speed continuous.
+export function solveTwoBone(origin,target,upper,lower,pole,soft=false) {
   const axis=vector(target).sub(vector(origin)),length=axis.length();
   if(length<1e-8)axis.set(0,-1,0);else axis.divideScalar(length);
-  const distance=THREE.MathUtils.clamp(length,Math.abs(upper-lower)+1e-6,upper+lower-1e-6);
+  const reach=upper+lower,margin=.02*reach;
+  const eased=soft&&length>reach-margin?reach-margin+margin*(1-Math.exp(-(length-(reach-margin))/margin)):length;
+  const distance=THREE.MathUtils.clamp(eased,Math.abs(upper-lower)+1e-6,upper+lower-1e-6);
   const along=(upper*upper+distance*distance-lower*lower)/(2*distance),radius=Math.sqrt(Math.max(0,upper*upper-along*along));
   const bend=vector(pole).addScaledVector(axis,-vector(pole).dot(axis));
   if(bend.lengthSq()<1e-8)bend.set(1,0,0).addScaledVector(axis,-axis.x);
   bend.normalize();
   return [vector(origin).addScaledVector(axis,along).addScaledVector(bend,radius).toArray(),vector(origin).addScaledVector(axis,distance).toArray()];
 }
-export function solveLimb(joints,rest,side,type,target,pole) {
+export function solveLimb(joints,rest,side,type,target,pole,soft=false) {
   const [root,middle,end]=type==='arm'?(side===0?[3,4,5]:[6,7,8]):(side===0?[9,10,11]:[12,13,14]);
-  [joints[middle],joints[end]]=solveTwoBone(joints[root],target,segmentLength(rest,root,middle),segmentLength(rest,middle,end),pole);
+  [joints[middle],joints[end]]=solveTwoBone(joints[root],target,segmentLength(rest,root,middle),segmentLength(rest,middle,end),pole,soft);
   return joints;
 }
 export function setFoot(joints,rest,side,rotation=new THREE.Quaternion()) {
