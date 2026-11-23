@@ -1,0 +1,27 @@
+name: Stage APKs for direct download
+on:
+  push:
+    branches: [ci/stage-apks]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download release APKs and put them on the apk-download branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir dl
+          gh release download gym-v2 --repo "$GITHUB_REPOSITORY" -p 'Synex-*.apk' --dir dl
+          ls -la dl
+          git config user.name "github-actions"
+          git config user.email "noreply@github.com"
+          git checkout --orphan apk-download
+          git rm -rf . >/dev/null 2>&1 || true
+          cp dl/Synex-Member.apk dl/Synex-Coach.apk .
+          git add Synex-Member.apk Synex-Coach.apk
+          git commit -q -m "Staged APK binaries for direct download"
+          git push -f origin apk-download
