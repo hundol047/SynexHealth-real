@@ -156,13 +156,13 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        {form.training_mode==='bodyweight'?<p className="muted" style={{marginTop:14}}>맨몸운동만 선택해서 기구 목록은 숨겼어요. 운동 방식을 바꾸면 기구를 고를 수 있습니다.</p>:
         <div style={{ marginTop: 14 }}>
           {/* Select changes inside fire onChangeCapture on the wrapper, which marks the draft dirty. */}
           <ExperienceDetail detail={form.experience_detail} savedLevel={form.experience_level}
             onChange={(detail) => setForm({ ...form, experience_detail: detail })} />
         </div>
 
+        {form.training_mode==='bodyweight'?<p className="muted" style={{marginTop:14}}>맨몸운동만 선택해서 기구 목록은 숨겼어요. 운동 방식을 바꾸면 기구를 고를 수 있습니다.</p>:
         <div style={{ marginTop: 14 }}>
           <label className="field-label">실제로 이용할 수 있는 운동 기구</label><p className="muted">가진 기구만 고르세요. 머신은 이용할 종류를 각각 선택합니다.</p>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>

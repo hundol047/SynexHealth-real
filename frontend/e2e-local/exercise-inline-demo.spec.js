@@ -12,6 +12,7 @@ test('opening a routine exercise plays inside the same card without a dialog or 
  await expect(page.getByText('측정값을 저장했습니다.')).toBeVisible();
  await page.goto('/health/routine');
  await page.getByRole('button',{name:'내 운동 계획 만들기'}).click();
+ await page.getByRole('button',{name:'이 조건으로 루틴 생성'}).click();
  const trigger=page.locator('.exercise-experience-card').first().getByRole('button',{name:/동작 보기$/});
  await trigger.scrollIntoViewIfNeeded();
  const y=await page.evaluate(()=>window.scrollY);
