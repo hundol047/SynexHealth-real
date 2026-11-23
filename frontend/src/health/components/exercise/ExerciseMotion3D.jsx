@@ -22,6 +22,7 @@ import {prepareAthlete,getGripSurface,exerciseShoeFloor} from './athleteModel.js
 import { exerciseHandShape } from './handPoses.js';
 import { morphParameters } from '../body3d/morph.js';
 import { deformSurface, poseJoints } from './rig.js';
+import { softwareRendering } from './softwareRendering.js';
 import { MOTIONS } from './motions.js';
 import {FLOOR_STRETCHES} from './stretchRig.js';
 import MotionFigure from './MotionFigure.jsx';
@@ -52,7 +53,7 @@ function SceneCamera({ motion, view, mirror, heightScale, controls, faceFocus })
   return null;
 }
 
-function Athlete({ motion, progress, mirror, measurement, profile, compact, appearance, onReady, character, highlight }) {
+function Athlete({ motion, progress, mirror, measurement, profile, compact, light, appearance, onReady, character, highlight }) {
   const actor = useRef(), readyMotion = useRef();
   // Bundled and cached by the loader; no remote request or per-frame texture allocation.
   const faceAtlases=useTexture([maleFaceAtlas,femaleFaceAtlas,layeredHairAtlas,bobHairAtlas,pixieHairAtlas,sleekHairAtlas,sleekHairNormal,naturalShortHairAtlas]);
@@ -109,7 +110,7 @@ function Athlete({ motion, progress, mirror, measurement, profile, compact, appe
   useEffect(() => () => { model.geometry.dispose(); model.appearance.dispose(); }, [model]);
   return <group scale={[mirror ? -1 : 1, 1, 1]}>
     <group ref={actor}>
-      <mesh name="exercise-athlete" geometry={model.geometry} material={model.appearance.materials} castShadow={!compact} receiveShadow onAfterRender={(renderer) => {
+      <mesh name="exercise-athlete" geometry={model.geometry} material={model.appearance.materials} castShadow={!light} receiveShadow onAfterRender={(renderer) => {
         if(readyMotion.current !== motion){readyMotion.current = motion;requestAnimationFrame(() => onReady?.());}
         renderer.domElement.dataset.exerciseRendered = motion;
         renderer.domElement.dataset.exerciseAppearance = appearance;
@@ -165,21 +166,25 @@ function TrainingMat({ heightScale }) {
   </mesh>;
 }
 
-function Studio({ compact, heightScale, motion, portrait=false }) {
+// `light` drops the shadow passes. It is the compact preview's quality, and also what a
+// device without GPU acceleration gets at full size.
+function Studio({ light, software=false, heightScale, motion, portrait=false }) {
   const floor = FLOOR_MOTIONS.test(motion) || FLOOR_STRETCHES.has(motion) || MOTIONS[motion]?.prop === 'mat';
   return <>
-    <StudioEnvironment portrait={portrait}/>
+    {/* Building the reflection environment renders and blurs a cube map: seconds without a GPU.
+        Plain sky light stands in for it there. */}
+    {!software && <StudioEnvironment portrait={portrait}/>}
     <color attach="background" args={['#f7faff']}/>
     <fog attach="fog" args={['#f7faff', 5, 11]}/>
-    <hemisphereLight args={['#fffaf6', '#c4cedb', portrait?.42:.45]}/>
-    <directionalLight position={portrait?[-2,3,4]:[-3,5,4]} color="#fff8f1" intensity={portrait?1.20:1.7} castShadow={!compact} shadow-mapSize={[1024, 1024]} shadow-camera-left={-2} shadow-camera-right={2} shadow-camera-top={2.6} shadow-camera-bottom={-1.3} shadow-bias={-.0003} shadow-normalBias={.012} shadow-radius={4}/>
+    <hemisphereLight args={['#fffaf6', '#c4cedb', (portrait?.42:.45)+(software?.3:0)]}/>
+    <directionalLight position={portrait?[-2,3,4]:[-3,5,4]} color="#fff8f1" intensity={portrait?1.20:1.7} castShadow={!light} shadow-mapSize={[1024, 1024]} shadow-camera-left={-2} shadow-camera-right={2} shadow-camera-top={2.6} shadow-camera-bottom={-1.3} shadow-bias={-.0003} shadow-normalBias={.012} shadow-radius={4}/>
     <directionalLight position={[3, 2, 2]} color="#e4efff" intensity={portrait?.50:.65}/>
     <directionalLight position={[1, 3, -3]} color="#edf3ff" intensity={.85}/>
     <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -.021, 0]}><planeGeometry args={[30, 30]}/><meshStandardMaterial color="#eff4fb" roughness={.95}/></mesh>
     {floor && <TrainingMat heightScale={heightScale}/>}
     {/* The portrait camera cannot see the floor. Skip its extra depth/blur
         passes while editing the face; full-body exercise shadows are retained. */}
-    {!portrait && (compact ? <SoftFloorShadow floor={floor} heightScale={heightScale}/> : <ContactShadows position={[0, floor ? .001 : -.019, 0]} opacity={.29} scale={4} blur={2.3} far={2} resolution={512}/>)}
+    {!portrait && (light ? <SoftFloorShadow floor={floor} heightScale={heightScale}/> : <ContactShadows position={[0, floor ? .001 : -.019, 0]} opacity={.29} scale={4} blur={2.3} far={2} resolution={512}/>)}
   </>;
 }
 
@@ -224,6 +229,7 @@ export default function ExerciseMotion3D({ motion, progress, mirror, measurement
   // machine's calibrated seat or make a supported palm float off the mat.
   const m = measurement, p = useMemo(() => ({...profile,gender:character.body}), [profile,character.body]);
   const heightScale = morphParameters(m, p).heightScale;
+  const software = softwareRendering(), light = compact || software;
   const fallback = <ExerciseSceneFallback onReady={onReady}>{fallbackContent||<MotionFigure exercise={{ motion_id: motion, exercise_name: '운동' }} progress={progress} mirror={mirror}/>}</ExerciseSceneFallback>;
   return <>
     {!compact && <div className="motion-appearance-controls" role="group" aria-label="시범 인체 표현">
@@ -232,9 +238,9 @@ export default function ExerciseMotion3D({ motion, progress, mirror, measurement
     </div>}
     <div className="motion-controls motion-view-controls">{compact ? <select aria-label="운동 시범 방향" value={view} onChange={event => setView(event.target.value)}><option value="front">정면</option><option value="45">45°</option><option value="side">측면</option></select> : [['front', '정면'], ['45', '45°'], ['side', '측면'], ['back', '후면'], ['free', '자유']].map(([id, label]) => <button key={id} type="button" className="btn btn-ghost" aria-label={`${label} 운동 시범 보기`} aria-pressed={view === id} onClick={() => setView(id)}>{label}</button>)}</div>
     <div className="motion-3d-canvas" style={{ position: 'relative', height: compact ? undefined : 340, flex: compact ? '1 1 0' : undefined, minHeight: compact ? 0 : undefined, touchAction: 'none' }}>
-      <SceneBoundary motion={motion} fallback={fallback}><React.Suspense fallback={<p className="motion-loading" role="status">캐릭터를 준비하고 있습니다.</p>}><Canvas shadows={!compact} dpr={[1, compact ? 1.5 : 2]} frameloop="demand" gl={{ antialias: true, alpha: true, powerPreference: 'low-power' }} camera={{ position: [3, 1.5, 3], fov: 36 }} fallback={fallback} aria-label={appearance === 'mannequin' ? '운동 부위를 강조한 3D 운동 시범' : '운동복을 입은 3D 운동 시범'}>
-        <SceneCamera motion={motion} view={view} mirror={mirror} heightScale={heightScale} controls={controls} faceFocus={faceFocus}/><Studio compact={compact} heightScale={heightScale} motion={motion} portrait={faceFocus}/>
-        <Athlete {...{ motion, progress, mirror, compact, appearance, onReady, character, highlight }} measurement={m} profile={p}/>
+      <SceneBoundary motion={motion} fallback={fallback}><React.Suspense fallback={<p className="motion-loading" role="status">캐릭터를 준비하고 있습니다.</p>}><Canvas shadows={!light} dpr={[1, software ? 1 : compact ? 1.5 : 2]} frameloop="demand" gl={{ antialias: !software, alpha: true, powerPreference: 'low-power' }} camera={{ position: [3, 1.5, 3], fov: 36 }} fallback={fallback} aria-label={appearance === 'mannequin' ? '운동 부위를 강조한 3D 운동 시범' : '운동복을 입은 3D 운동 시범'}>
+        <SceneCamera motion={motion} view={view} mirror={mirror} heightScale={heightScale} controls={controls} faceFocus={faceFocus}/><Studio light={light} software={software} heightScale={heightScale} motion={motion} portrait={faceFocus}/>
+        <Athlete {...{ motion, progress, mirror, compact, light, appearance, onReady, character, highlight }} measurement={m} profile={p}/>
         <OrbitControls ref={controls} enabled={view === 'free'} enablePan={false} minDistance={(faceFocus ? .38 : 1.2) * heightScale} maxDistance={(faceFocus ? .95 : 6) * heightScale} maxPolarAngle={Math.PI / 2 - .02}/>
       </Canvas></React.Suspense></SceneBoundary>
       {compact && highlight && anatomy.primary.length > 0 && <span className="motion-anatomy-badge" title={`주요 부위: ${anatomy.primaryLabel}. 운동 안내이며 실제 근육 사용량 측정이 아닙니다.`}>빨강 · 주요 운동 부위</span>}
