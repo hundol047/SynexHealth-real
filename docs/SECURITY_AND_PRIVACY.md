@@ -37,3 +37,7 @@ The container starts uvicorn without a trusted-proxy list, and uvicorn only trus
 - Every visitor shares the proxy's address, so the per-address limits (240 requests a minute, 60 session changes) become limits for the whole service.
 
 Set `FORWARDED_ALLOW_IPS` to the proxy's address or network, never `*` on a host that is reachable directly. Even when set correctly, people on one campus network share a public address: 240 requests a minute is low for a class using the app at the same time, so enforce limits per account at the gateway for such deployments. This has not been exercised against a real proxy.
+
+### Open question: WebAssembly under the content security policy on iOS 15 — NOT DEVICE VERIFIED
+
+The iOS project's deployment target is 15.0. The policy allows the bundled pose model with `'wasm-unsafe-eval'`, which WebKit is understood to honour from Safari 16; earlier versions may require `'unsafe-eval'` to compile WebAssembly. If so, camera pose feedback would not start on iOS 15 while the rest of the app works. This has not been tested on a device. The choices are to raise the deployment target to iOS 16, or to add `'unsafe-eval'` to `script-src` (the app itself does not use `eval`, but the policy would no longer block it). Until one is chosen and checked on a device, treat iOS 15 pose feedback as unverified.

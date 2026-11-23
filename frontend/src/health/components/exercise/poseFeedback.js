@@ -61,7 +61,7 @@ export function poseFeedback(id,result){
 
 // Retains only bounded numeric aggregates and observed issue text, never frames or landmarks.
 export class PoseSessionReport{
- constructor(motionId=null){this.motionId=motionId;this.profile=getCoachingProfile(motionId);this.observations=new Map();this.frames=0;this.valid=0;this.last=null;this.validMs=0;this.issues=new Map();this.metrics=new Map();this.baseReps=null;this.reps=0;this.previousIssues=new Set();this.countSupported=true;}
+ constructor(motionId=null){this.motionId=motionId;this.profile=getCoachingProfile(motionId);this.observations=new Map();this.frames=0;this.valid=0;this.last=null;this.validMs=0;this.issues=new Map();this.metrics=new Map();this.baseReps=null;this.reps=0;this.previousIssues=new Set();this.countSupported=true;this.repSeconds=[];this.repRanges=[];this.repMin=Infinity;this.repMax=-Infinity;this.balance=[];}
  add(result,time){
   if(!Number.isFinite(time))return;
   if(result.count_supported===false)this.countSupported=false;
@@ -70,7 +70,18 @@ export class PoseSessionReport{
   if(!result.detected){this.wasValid=false;this.previousIssues.clear();return;}
   for(const observation of result.coaching?.observations||result.observations||[]){if(observation.label&&this.observations.size<16)this.observations.set(observation.label,{label:observation.label,value:observation.value,reference:observation.reference});}
   this.valid++;if(this.wasValid)this.validMs+=delta;this.wasValid=true;
-  this.baseReps??=result.reps||0;this.reps=Math.max(this.reps,(result.reps||0)-this.baseReps);
+  this.baseReps??=result.reps||0;
+  // Per-repetition numbers for the summary: how long each took and how far the joint travelled.
+  if(Number.isFinite(result.angle)){this.repMin=Math.min(this.repMin,result.angle);this.repMax=Math.max(this.repMax,result.angle);}
+  const counted=(result.reps||0)-this.baseReps;
+  if(counted>this.reps){
+   if(Number.isFinite(result.rep_seconds)&&result.rep_seconds>0&&this.repSeconds.length<200)this.repSeconds.push(result.rep_seconds);
+   if(Number.isFinite(this.repMin)&&this.repMax>this.repMin&&this.repRanges.length<200)this.repRanges.push(this.repMax-this.repMin);
+   this.repMin=Infinity;this.repMax=-Infinity;
+  }
+  // Left/right angle difference only means something when the camera faces the person.
+  if(Number.isFinite(result.left_right_balance)&&result.metrics?.camera_view==='front'&&this.balance.length<2000)this.balance.push(result.left_right_balance);
+  this.reps=Math.max(this.reps,counted);
   for(const issue of result.issues||[]){
    if(issue.severity==='camera')continue;
    const old=this.issues.get(issue.id)||{id:issue.id,bodyPart:issue.bodyPart,message:issue.message,samples:0,observedMs:0};
@@ -83,5 +94,28 @@ export class PoseSessionReport{
    this.metrics.set(key,{min:Math.min(old.min,...values),max:Math.max(old.max,...values)});
   }
  }
- snapshot(){return {motionId:this.motionId,exerciseName:this.profile?.label,observations:[...this.observations.values()],countSupported:this.countSupported,frames:this.frames,validFrames:this.valid,observedSeconds:Math.round(this.validMs/100)/10,reps:this.reps,issues:[...this.issues.values()].sort((a,b)=>b.samples-a.samples).slice(0,5),ranges:Object.fromEntries(this.metrics),sufficient:this.valid>=5&&this.validMs>=1000};}
+ // Plain statements of what was measured in this clip. "good" lines say what held steady,
+ // "check" lines say what varied; neither is a judgement of correct form.
+ summary(){
+  const lines=[],mean=v=>v.reduce((a,b)=>a+b,0)/v.length,one=v=>Math.round(v*10)/10;
+  if(this.frames>=10&&this.valid/this.frames<.6)lines.push({tone:'check',text:`분석할 수 있었던 구간이 전체의 ${Math.round(this.valid/this.frames*100)}%였어요. 전신이 계속 보이게 카메라를 고정하면 더 많이 확인할 수 있어요.`});
+  if(this.repSeconds.length>=3){
+   const average=mean(this.repSeconds),fastest=Math.min(...this.repSeconds),slowest=Math.max(...this.repSeconds);
+   if((slowest-fastest)/average<=.25)lines.push({tone:'good',text:`반복 속도가 일정했어요 · 한 번에 평균 ${one(average)}초`});
+   else lines.push({tone:'check',text:`반복 속도 차이가 컸어요 · 가장 빠를 때 ${one(fastest)}초, 가장 느릴 때 ${one(slowest)}초`});
+   if(average<1.5)lines.push({tone:'check',text:`한 번에 평균 ${one(average)}초로 빠른 편이에요. 반동 없이 조절되는지 확인해 보세요.`});
+  }
+  if(this.repRanges.length>=4){
+   const half=Math.floor(this.repRanges.length/2),early=mean(this.repRanges.slice(0,half)),late=mean(this.repRanges.slice(-half));
+   if(late<early*.85)lines.push({tone:'check',text:`뒤로 갈수록 움직임 범위가 줄었어요 · 처음 ${Math.round(early)}° → 나중 ${Math.round(late)}°`});
+   else lines.push({tone:'good',text:`움직임 범위가 끝까지 유지됐어요 · 평균 ${Math.round(mean(this.repRanges))}°`});
+  }
+  if(this.balance.length>=10){
+   const average=mean(this.balance);
+   if(average<=10)lines.push({tone:'good',text:`좌우 관절 각도 차이가 작았어요 · 평균 ${Math.round(average)}°`});
+   else if(average>20)lines.push({tone:'check',text:`좌우 관절 각도 차이가 평균 ${Math.round(average)}°였어요. 카메라가 정면을 향했는지 먼저 확인해 보세요.`});
+  }
+  return lines.slice(0,4);
+ }
+ snapshot(){return {motionId:this.motionId,exerciseName:this.profile?.label,observations:[...this.observations.values()],countSupported:this.countSupported,frames:this.frames,validFrames:this.valid,observedSeconds:Math.round(this.validMs/100)/10,reps:this.reps,issues:[...this.issues.values()].sort((a,b)=>b.samples-a.samples).slice(0,5),ranges:Object.fromEntries(this.metrics),sufficient:this.valid>=5&&this.validMs>=1000,summary:this.valid>=5&&this.validMs>=1000?this.summary():[]};}
 }

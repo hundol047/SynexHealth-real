@@ -14,3 +14,9 @@
 @media(orientation:landscape) and (max-height:600px){.tempo-workout-live .coach-stage{grid-template-columns:1fr 1fr;grid-template-rows:minmax(0,1fr)}.tempo-workout-live .camera-coaching-immersive{grid-template-rows:minmax(0,1fr) 52px}.tempo-workout-live>header p{display:none}}
 @media(max-height:700px) and (orientation:portrait){.tempo-workout-live .coach-demo .motion-view-controls,.tempo-workout-live .bodyweight-demo-controls,.tempo-workout-live .bodyweight-demo-cue{display:none}.tempo-workout-live .camera-coaching-immersive{grid-template-rows:minmax(0,1fr) 82px}.tempo-workout-live .tempo-heading{font-size:12px}.tempo-workout-live .tempo-panel-compact details{margin:0}}
 @media(max-height:700px) and (orientation:portrait){.tempo-workout-live .camera-coaching .bodyweight-demo-cue,.tempo-workout-live .camera-coaching .bodyweight-demo-target,.tempo-workout-live .camera-coaching .bodyweight-tempo-readout{display:none}}
+
+.pose-summary{list-style:none;margin:10px 0;padding:0;display:grid;gap:8px}
+.pose-summary li{display:grid;gap:2px;padding:10px 12px;border-radius:10px;border:1px solid #dfe7f2;background:#fff;font-size:.9rem;line-height:1.5}
+.pose-summary li strong{font-size:.75rem;letter-spacing:.01em}
+.pose-summary-good strong{color:#1f9d6f}.pose-summary-good{border-left:4px solid #1f9d6f!important}
+.pose-summary-check strong{color:#c07c1e}.pose-summary-check{border-left:4px solid #c07c1e!important}
