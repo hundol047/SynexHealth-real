@@ -107,22 +107,25 @@ def test_auth_endpoints_have_a_smaller_rate_budget():
 
     middleware = SecurityMiddleware(inner)
 
-    async def call(path):
+    async def call(path, method='POST'):
         async def receive():
             return {'type': 'http.request', 'body': b'', 'more_body': False}
 
         async def send(message):
             if message['type'] == 'http.response.start':
                 statuses.append(message['status'])
-        await middleware({'type': 'http', 'method': 'GET', 'path': path, 'headers': [], 'client': ('203.0.113.9', 1), 'scheme': 'http'}, receive, send)
+        await middleware({'type': 'http', 'method': method, 'path': path, 'headers': [], 'client': ('203.0.113.9', 1), 'scheme': 'http'}, receive, send)
 
     async def run():
-        for _ in range(31):
+        for _ in range(61):
             await call('/api/auth/session')
-        await call('/api/health/status')
+        # Public sign-in configuration stays available to everyone behind the same address.
+        for _ in range(40):
+            await call('/api/auth/config', 'GET')
+        await call('/api/health/status', 'GET')
     asyncio.run(run())
-    assert statuses[:30] == [204] * 30 and statuses[30] == 429
-    assert statuses[31] == 204
+    assert statuses[:60] == [204] * 60 and statuses[60] == 429
+    assert statuses[61:] == [204] * 41
 
 
 def test_api_documentation_is_not_published_in_production():

@@ -17,7 +17,7 @@ IMPLEMENTED / VERIFIED by automated tests (`backend/tests/test_production_harden
 - **Personal build policy.** The build-time policy widened from `connect-src 'self'` alone to a full policy (scripts, styles, images, media, workers, objects, base URI, forms). Requests to other hosts stay blocked.
 - **API documentation.** `/docs`, `/redoc` and `/openapi.json` are not served when `APP_ENV=production` or `PILOT_MODE=true`.
 - **Error responses.** Validation errors return only location, message and type. The submitted value (a health measurement) is no longer echoed. Unhandled errors return a fixed message; the log records the exception class and route, not its message.
-- **Sign-in rate budget.** `/api/auth/*` is limited to 30 requests a minute per client address, separate from the general 240. Like the general limit it is per process; a shared gateway limiter is still required behind multiple workers or a proxy that hides client addresses.
+- **Sign-in rate budget.** Session changes under `/api/auth/*` (POST/DELETE) are limited to 60 a minute per client address, separate from the general 240. Public sign-in configuration reads are not counted, so a class behind one campus address can open the login screen together. Like the general limit it is per process; a shared gateway limiter is still required behind multiple workers or a proxy that hides client addresses.
 
 Limits to state plainly: `style-src` still allows inline styles because React style attributes need it. `connect-src` on the server-hosted shell allows `https:` because the OIDC token endpoint lives on the identity provider's host. None of this has been verified on a physical device.
 
@@ -28,3 +28,12 @@ Limits to state plainly: `style-src` still allows inline styles because React st
 - No real user's email address is stored: accounts are keyed by the provider's subject identifier. Only demo seed data contains an email.
 - The one password the server checks is the App Store review account (PBKDF2-SHA256, 600,000 rounds). It now locks for 15 minutes after 10 wrong attempts from any address, in addition to the per-address limit.
 - Password strength, breach checks and two-step verification are the identity provider's responsibility and must be enabled there. They cannot be enforced from this app.
+
+### Deployment behind a proxy or load balancer — EXTERNAL SETUP REQUIRED
+
+The container starts uvicorn without a trusted-proxy list, and uvicorn only trusts forwarded headers from `127.0.0.1` by default. Behind a TLS-terminating proxy or load balancer this has two consequences unless `FORWARDED_ALLOW_IPS` is set to the proxy's address (uvicorn reads that environment variable):
+
+- With `APP_ENV=production` every request is answered `400 HTTPS 연결이 필요합니다`, because the app sees the proxy's plain-HTTP hop instead of the visitor's HTTPS connection.
+- Every visitor shares the proxy's address, so the per-address limits (240 requests a minute, 60 session changes) become limits for the whole service.
+
+Set `FORWARDED_ALLOW_IPS` to the proxy's address or network, never `*` on a host that is reachable directly. Even when set correctly, people on one campus network share a public address: 240 requests a minute is low for a class using the app at the same time, so enforce limits per account at the gateway for such deployments. This has not been exercised against a real proxy.

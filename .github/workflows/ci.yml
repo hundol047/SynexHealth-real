@@ -70,7 +70,13 @@ jobs:
         working-directory: backend
       - run: PYTHONPATH=. python scripts/verify_postgres.py
         working-directory: backend
-      - run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
+      # The runner image's own package list does not always carry the PostgreSQL 16 client.
+      # Take it from the PostgreSQL project's apt repository so pg_dump matches the server.
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y postgresql-client-16
       - run: python scripts/verify_postgres_restore.py
         working-directory: backend
         env:

@@ -25,10 +25,12 @@ class SecurityMiddleware:
    key=hashlib.sha256(((scope.get('client') or ('unknown',0))[0]+('review' if path=='/api/auth/review' else '')).encode()).digest();minute=int(time.time()/60)
    old,count=self.buckets.get(key,(minute,0));count=count+1 if old==minute else 1;self.buckets[key]=(minute,count);self.buckets.move_to_end(key)
    while len(self.buckets)>10000:self.buckets.popitem(last=False)
-   # Sign-in and session endpoints get a much smaller budget than ordinary API reads.
-   if path.startswith('/api/auth/') and path!='/api/auth/review':
+   # Session changes get a smaller budget than ordinary API reads. Public sign-in configuration
+   # (GET) is not counted: every login screen loads it, and a whole class behind one campus
+   # address opening the app together must not lock each other out.
+   if path.startswith('/api/auth/') and path!='/api/auth/review' and method not in ('GET','HEAD','OPTIONS'):
     auth_key=key+b'auth';old_auth,auth_count=self.buckets.get(auth_key,(minute,0));auth_count=auth_count+1 if old_auth==minute else 1;self.buckets[auth_key]=(minute,auth_count)
-    if auth_count>30:return await JSONResponse({'detail':'요청이 많습니다. 잠시 후 다시 시도하세요.'},429,headers={'Retry-After':'60'})(scope,receive,send)
+    if auth_count>60:return await JSONResponse({'detail':'요청이 많습니다. 잠시 후 다시 시도하세요.'},429,headers={'Retry-After':'60'})(scope,receive,send)
    if count>(10 if path=='/api/auth/review' else 240):return await JSONResponse({'detail':'요청이 많습니다. 잠시 후 다시 시도하세요.'},429,headers={'Retry-After':'60'})(scope,receive,send)
    if headers.get(b'cookie') and not headers.get(b'authorization',b'').lower().startswith(b'bearer ') and method not in ('GET','HEAD','OPTIONS'):
     import os
